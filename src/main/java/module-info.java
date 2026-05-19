@@ -17,4 +17,5 @@ module dev.adrian.goral.localhiveagent {
     exports dev.adrian.goral.localhiveagent.app;
 
     opens dev.adrian.goral.localhiveagent.config to tools.jackson.databind;
+    opens dev.adrian.goral.localhiveagent.master.dto to tools.jackson.databind;
 }
