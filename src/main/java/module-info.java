@@ -1,11 +1,20 @@
 module dev.adrian.goral.localhiveagent {
     requires javafx.controls;
-    requires javafx.fxml;
-    requires javafx.web;
+    requires javafx.graphics;
+    requires javafx.swing;
 
-    requires org.kordamp.ikonli.javafx;
+    requires java.desktop;
+    requires java.net.http;
+
+    requires com.github.oshi;
+    requires org.slf4j;
+
+    requires tools.jackson.databind;
+
     requires eu.hansolo.tilesfx;
+    requires org.kordamp.ikonli.javafx;
 
-    opens dev.adrian.goral.localhiveagent to javafx.fxml;
-    exports dev.adrian.goral.localhiveagent;
+    exports dev.adrian.goral.localhiveagent.app;
+
+    opens dev.adrian.goral.localhiveagent.config to tools.jackson.databind;
 }
