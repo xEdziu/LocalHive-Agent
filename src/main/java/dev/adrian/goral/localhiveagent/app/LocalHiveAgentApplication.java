@@ -19,6 +19,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
+import javafx.scene.control.Slider;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
@@ -55,6 +56,9 @@ public class LocalHiveAgentApplication extends Application {
     private Button startHeartbeatButton;
     private Button stopHeartbeatButton;
     private Button heartbeatNowButton;
+    private Slider sharedRamSlider;
+    private Button updateAllocationButton;
+    private int detectedTotalRamMb;
 
     @Override
     public void init() {
@@ -80,6 +84,7 @@ public class LocalHiveAgentApplication extends Application {
     public void start(Stage stage) {
         AgentConfig config = configService.loadOrCreate();
         MachineSpec machineSpec = systemInfoProvider.collectMachineSpec(config.sharedRamMb());
+        this.detectedTotalRamMb = machineSpec.totalRamMb();
 
         log.info("LocalHive Agent started");
         log.info("Config path: {}", configService.configPath());
@@ -124,6 +129,33 @@ public class LocalHiveAgentApplication extends Application {
         sharedRamMbField = new TextField(String.valueOf(config.sharedRamMb()));
         sharedRamMbField.setPromptText("8192");
 
+        sharedRamSlider = new Slider(0, Math.max(1024, detectedTotalRamMb), config.sharedRamMb());
+        sharedRamSlider.setShowTickLabels(true);
+        sharedRamSlider.setShowTickMarks(true);
+        sharedRamSlider.setMajorTickUnit(8192);
+        sharedRamSlider.setBlockIncrement(512);
+
+        sharedRamSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
+            int roundedValue = roundToStep(newValue.intValue(), 512);
+            sharedRamMbField.setText(String.valueOf(roundedValue));
+        });
+
+        sharedRamMbField.textProperty().addListener((observable, oldValue, newValue) -> {
+            if (newValue == null || newValue.isBlank()) {
+                return;
+            }
+
+            try {
+                int parsedValue = Integer.parseInt(newValue.trim());
+
+                if (parsedValue >= 0 && parsedValue <= detectedTotalRamMb) {
+                    sharedRamSlider.setValue(parsedValue);
+                }
+            } catch (NumberFormatException ignored) {
+                // Invalid input is handled when saving.
+            }
+        });
+
         apiKeyField = new PasswordField();
         apiKeyField.setPromptText(config.hasApiKey() ? "API key is configured" : "Paste API key after approval");
 
@@ -136,7 +168,8 @@ public class LocalHiveAgentApplication extends Application {
         grid.addRow(3, new Label("API Key status:"), apiKeyLabel);
         grid.addRow(4, new Label("New API Key:"), apiKeyField);
         grid.addRow(5, new Label("Shared RAM MB:"), sharedRamMbField);
-        grid.addRow(6, new Label("Paused:"), new Label(String.valueOf(config.pauseEnabled())));
+        grid.addRow(6, new Label("Shared RAM slider:"), sharedRamSlider);
+        grid.addRow(7, new Label("Paused:"), new Label(String.valueOf(config.pauseEnabled())));
 
         return grid;
     }
@@ -162,6 +195,9 @@ public class LocalHiveAgentApplication extends Application {
         registerButton.setDisable(config.hasWorkerId());
         registerButton.setOnAction(event -> registerWithMaster());
 
+        updateAllocationButton = new Button("Update Allocation");
+        updateAllocationButton.setOnAction(event -> updateAllocation());
+
         heartbeatNowButton = new Button("Send Heartbeat Now");
         heartbeatNowButton.setOnAction(event -> sendHeartbeatNow(heartbeatNowButton));
 
@@ -178,6 +214,7 @@ public class LocalHiveAgentApplication extends Application {
         VBox box = new VBox(10);
         box.getChildren().addAll(
                 saveConfigButton,
+                updateAllocationButton,
                 registerButton,
                 heartbeatNowButton,
                 startHeartbeatButton,
@@ -388,6 +425,10 @@ public class LocalHiveAgentApplication extends Application {
         if (heartbeatNowButton != null) {
             heartbeatNowButton.setDisable(!canUseHeartbeat);
         }
+
+        if (updateAllocationButton != null) {
+            updateAllocationButton.setDisable(!canUseHeartbeat);
+        }
     }
 
     private static void validateConfigBeforeHeartbeat(AgentConfig config) {
@@ -411,7 +452,7 @@ public class LocalHiveAgentApplication extends Application {
         return grid;
     }
 
-    private static int parseSharedRamMb(String value) {
+    private int parseSharedRamMb(String value) {
         if (value == null || value.isBlank()) {
             return 0;
         }
@@ -423,9 +464,69 @@ public class LocalHiveAgentApplication extends Application {
                 throw new IllegalArgumentException("Shared RAM cannot be negative.");
             }
 
+            if (sharedRamMb > detectedTotalRamMb) {
+                throw new IllegalArgumentException("Shared RAM cannot be greater than total RAM.");
+            }
+
             return sharedRamMb;
         } catch (NumberFormatException exception) {
             throw new IllegalArgumentException("Shared RAM must be a valid integer.", exception);
         }
+    }
+
+    private void updateAllocation() {
+        if (!saveConfigFromFields()) {
+            return;
+        }
+
+        AgentConfig config = configService.load();
+
+        try {
+            validateConfigBeforeHeartbeat(config);
+        } catch (RuntimeException exception) {
+            statusLabel.setText("Cannot update allocation: " + exception.getMessage());
+            return;
+        }
+
+        updateAllocationButton.setDisable(true);
+        statusLabel.setText("Updating allocation...");
+
+        Task<Void> task = new Task<>() {
+            @Override
+            protected Void call() {
+                AgentConfig currentConfig = configService.load();
+
+                registrationClient.updateAllocation(
+                        currentConfig.masterBaseUrl(),
+                        currentConfig.workerId(),
+                        currentConfig.apiKey(),
+                        currentConfig.sharedRamMb()
+                );
+
+                return null;
+            }
+        };
+
+        task.setOnSucceeded(event -> {
+            statusLabel.setText("Allocation updated: " + configService.load().sharedRamMb() + " MB");
+            updateAllocationButton.setDisable(false);
+        });
+
+        task.setOnFailed(event -> {
+            Throwable exception = task.getException();
+
+            statusLabel.setText("Allocation update failed: " + exception.getMessage());
+            updateAllocationButton.setDisable(false);
+
+            log.warn("Allocation update failed", exception);
+        });
+
+        backgroundExecutor.submit(task);
+    }
+
+    private static int roundToStep(int value, int step) {
+        if (step <= 0)
+            return value;
+        return Math.round((float) value / step) * step;
     }
 }
