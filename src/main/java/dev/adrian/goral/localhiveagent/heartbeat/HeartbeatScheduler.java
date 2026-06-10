@@ -3,6 +3,7 @@ package dev.adrian.goral.localhiveagent.heartbeat;
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
 import dev.adrian.goral.localhiveagent.config.ConfigService;
 import dev.adrian.goral.localhiveagent.master.RegistrationClient;
+import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
 
 import java.time.Duration;
@@ -85,10 +86,16 @@ public final class HeartbeatScheduler implements AutoCloseable {
             AgentConfig config = configService.load();
             validateConfigBeforeHeartbeat(config);
 
+            HeartbeatRequest request = new HeartbeatRequest(
+                    config.pauseEnabled(),
+                    config.sharedRamMb()
+            );
+
             HeartbeatResponse response = registrationClient.sendHeartbeat(
                     config.masterBaseUrl(),
                     config.workerId(),
-                    config.apiKey()
+                    config.apiKey(),
+                    request
             );
 
             resultConsumer.accept(HeartbeatTickResult.success(response.status()));

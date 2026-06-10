@@ -7,10 +7,12 @@ import dev.adrian.goral.localhiveagent.heartbeat.HeartbeatTickResult;
 import dev.adrian.goral.localhiveagent.master.AgentRegistrationResult;
 import dev.adrian.goral.localhiveagent.master.AgentRegistrationService;
 import dev.adrian.goral.localhiveagent.master.RegistrationClient;
+import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
 import dev.adrian.goral.localhiveagent.system.MachineSpec;
 import dev.adrian.goral.localhiveagent.system.OshiSystemInfoProvider;
 import dev.adrian.goral.localhiveagent.system.SystemInfoProvider;
+import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -59,6 +61,10 @@ public class LocalHiveAgentApplication extends Application {
     private Slider sharedRamSlider;
     private Button updateAllocationButton;
     private int detectedTotalRamMb;
+
+    private Label pauseStatusLabel;
+    private Button pauseResumeButton;
+
 
     @Override
     public void init() {
@@ -169,7 +175,8 @@ public class LocalHiveAgentApplication extends Application {
         grid.addRow(4, new Label("New API Key:"), apiKeyField);
         grid.addRow(5, new Label("Shared RAM MB:"), sharedRamMbField);
         grid.addRow(6, new Label("Shared RAM slider:"), sharedRamSlider);
-        grid.addRow(7, new Label("Paused:"), new Label(String.valueOf(config.pauseEnabled())));
+        pauseStatusLabel = new Label(String.valueOf(config.pauseEnabled()));
+        grid.addRow(7, new Label("Paused:"), pauseStatusLabel);
 
         return grid;
     }
@@ -211,10 +218,14 @@ public class LocalHiveAgentApplication extends Application {
         statusLabel = new Label("Ready.");
         lastHeartbeatLabel = new Label("Last heartbeat: never");
 
+        pauseResumeButton = new Button(getPauseResumeButtonText(config.pauseEnabled()));
+        pauseResumeButton.setOnAction(event -> togglePauseMode());
+
         VBox box = new VBox(10);
         box.getChildren().addAll(
                 saveConfigButton,
                 updateAllocationButton,
+                pauseResumeButton,
                 registerButton,
                 heartbeatNowButton,
                 startHeartbeatButton,
@@ -318,10 +329,16 @@ public class LocalHiveAgentApplication extends Application {
                     AgentConfig config = configService.load();
                     validateConfigBeforeHeartbeat(config);
 
+                    HeartbeatRequest request = new HeartbeatRequest(
+                            config.pauseEnabled(),
+                            config.sharedRamMb()
+                    );
+
                     HeartbeatResponse response = registrationClient.sendHeartbeat(
                             config.masterBaseUrl(),
                             config.workerId(),
-                            config.apiKey()
+                            config.apiKey(),
+                            request
                     );
 
                     return HeartbeatTickResult.success(response.status());
@@ -400,13 +417,22 @@ public class LocalHiveAgentApplication extends Application {
         Platform.runLater(() -> {
             workerIdLabel.setText(config.hasWorkerId() ? config.workerId().toString() : "not registered");
             apiKeyLabel.setText(config.hasApiKey() ? "configured" : "missing");
+
+            if (pauseStatusLabel != null) {
+                pauseStatusLabel.setText(String.valueOf(config.pauseEnabled()));
+            }
+
+            if (pauseResumeButton != null) {
+                pauseResumeButton.setText(getPauseResumeButtonText(config.pauseEnabled()));
+            }
+
             refreshActionButtonState(config);
         });
     }
 
     private void refreshActionButtonState(AgentConfig config) {
         boolean canRegister = config.hasMasterBaseUrl() && !config.hasWorkerId();
-        boolean canUseHeartbeat = config.hasMasterBaseUrl()
+        boolean canUseWorkerApi = config.hasMasterBaseUrl()
                 && config.hasWorkerId()
                 && config.hasApiKey();
 
@@ -414,20 +440,24 @@ public class LocalHiveAgentApplication extends Application {
             registerButton.setDisable(!canRegister);
         }
 
+        if (updateAllocationButton != null) {
+            updateAllocationButton.setDisable(!canUseWorkerApi);
+        }
+
+        if (pauseResumeButton != null) {
+            pauseResumeButton.setDisable(!canUseWorkerApi);
+        }
+
+        if (heartbeatNowButton != null) {
+            heartbeatNowButton.setDisable(!canUseWorkerApi);
+        }
+
         if (startHeartbeatButton != null) {
-            startHeartbeatButton.setDisable(!canUseHeartbeat || heartbeatScheduler.isRunning());
+            startHeartbeatButton.setDisable(!canUseWorkerApi || heartbeatScheduler.isRunning());
         }
 
         if (stopHeartbeatButton != null) {
             stopHeartbeatButton.setDisable(!heartbeatScheduler.isRunning());
-        }
-
-        if (heartbeatNowButton != null) {
-            heartbeatNowButton.setDisable(!canUseHeartbeat);
-        }
-
-        if (updateAllocationButton != null) {
-            updateAllocationButton.setDisable(!canUseHeartbeat);
         }
     }
 
@@ -522,6 +552,95 @@ public class LocalHiveAgentApplication extends Application {
         });
 
         backgroundExecutor.submit(task);
+    }
+
+    private void togglePauseMode() {
+        if (!saveConfigFromFields()) {
+            return;
+        }
+
+        AgentConfig currentConfig = configService.load();
+
+        try {
+            validateConfigBeforeHeartbeat(currentConfig);
+        } catch (RuntimeException exception) {
+            statusLabel.setText("Cannot change Gamer Mode: " + exception.getMessage());
+            return;
+        }
+
+        boolean previousPauseState = currentConfig.pauseEnabled();
+        boolean newPauseState = !previousPauseState;
+
+        AgentConfig updatedConfig = configService.update(config -> config.withPauseEnabled(newPauseState));
+        refreshConfigLabels(updatedConfig);
+
+        pauseResumeButton.setDisable(true);
+        statusLabel.setText(newPauseState ? "Enabling Gamer Mode..." : "Disabling Gamer Mode...");
+
+        Task<HeartbeatTickResult> task = new Task<>() {
+            @Override
+            protected HeartbeatTickResult call() {
+                try {
+                    AgentConfig config = configService.load();
+                    validateConfigBeforeHeartbeat(config);
+
+                    HeartbeatRequest request = new HeartbeatRequest(
+                            config.pauseEnabled(),
+                            config.sharedRamMb()
+                    );
+
+                    HeartbeatResponse response = registrationClient.sendHeartbeat(
+                            config.masterBaseUrl(),
+                            config.workerId(),
+                            config.apiKey(),
+                            request
+                    );
+
+                    return HeartbeatTickResult.success(response.status());
+                } catch (RuntimeException exception) {
+                    return HeartbeatTickResult.failure(exception);
+                }
+            }
+        };
+
+        task.setOnSucceeded(event -> {
+            HeartbeatTickResult result = task.getValue();
+
+            if (result.success()) {
+                handleHeartbeatResult(result);
+                statusLabel.setText(newPauseState
+                        ? "Gamer Mode enabled. Worker is paused."
+                        : "Gamer Mode disabled. Worker is active.");
+            } else {
+                AgentConfig rolledBackConfig = configService.update(config -> config.withPauseEnabled(previousPauseState));
+                refreshConfigLabels(rolledBackConfig);
+
+                statusLabel.setText("Gamer Mode change failed: " + result.error().getMessage());
+                log.warn("Gamer Mode change failed", result.error());
+            }
+
+            pauseResumeButton.setDisable(false);
+            refreshActionButtonState(configService.load());
+        });
+
+        task.setOnFailed(event -> {
+            Throwable exception = task.getException();
+
+            AgentConfig rolledBackConfig = configService.update(config -> config.withPauseEnabled(previousPauseState));
+            refreshConfigLabels(rolledBackConfig);
+
+            statusLabel.setText("Gamer Mode change failed: " + exception.getMessage());
+            pauseResumeButton.setDisable(false);
+            refreshActionButtonState(rolledBackConfig);
+
+            log.warn("Gamer Mode change failed", exception);
+        });
+
+        backgroundExecutor.submit(task);
+    }
+
+    private static String getPauseResumeButtonText(boolean pauseEnabled) {
+        return pauseEnabled ? "Resume" : "Pause";
     }
 
     private static int roundToStep(int value, int step) {

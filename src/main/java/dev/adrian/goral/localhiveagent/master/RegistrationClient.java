@@ -1,9 +1,6 @@
 package dev.adrian.goral.localhiveagent.master;
 
-import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
-import dev.adrian.goral.localhiveagent.master.dto.WorkerAllocationUpdateRequest;
-import dev.adrian.goral.localhiveagent.master.dto.WorkerRegistrationRequest;
-import dev.adrian.goral.localhiveagent.master.dto.WorkerRegistrationResponse;
+import dev.adrian.goral.localhiveagent.master.dto.*;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
@@ -72,15 +69,19 @@ public class RegistrationClient {
         return registrationResponse;
     }
 
-    public HeartbeatResponse sendHeartbeat(String masterBaseUrl, UUID workerId, String apiKey) {
+    public HeartbeatResponse sendHeartbeat(String masterBaseUrl,
+                                           UUID workerId, String apiKey, HeartbeatRequest request) {
         validateWorkerIdentity(workerId, apiKey);
+
+        String requestBody = writeJson(request);
 
         HttpRequest httpRequest = HttpRequest.newBuilder()
                 .uri(buildUri(masterBaseUrl, "/api/workers/" + workerId + "/heartbeat"))
                 .timeout(requestTimeout)
                 .header(API_KEY_HEADER, apiKey)
+                .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
-                .POST(HttpRequest.BodyPublishers.noBody())
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
                 .build();
 
         HttpResponse<String> response = send(httpRequest);
