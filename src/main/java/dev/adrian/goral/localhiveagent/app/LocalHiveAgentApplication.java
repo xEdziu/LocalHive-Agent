@@ -1,18 +1,11 @@
 package dev.adrian.goral.localhiveagent.app;
 
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
-import dev.adrian.goral.localhiveagent.config.ConfigService;
-import dev.adrian.goral.localhiveagent.heartbeat.HeartbeatScheduler;
 import dev.adrian.goral.localhiveagent.heartbeat.HeartbeatTickResult;
 import dev.adrian.goral.localhiveagent.master.AgentRegistrationResult;
-import dev.adrian.goral.localhiveagent.master.AgentRegistrationService;
-import dev.adrian.goral.localhiveagent.master.RegistrationClient;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
 import dev.adrian.goral.localhiveagent.system.MachineSpec;
-import dev.adrian.goral.localhiveagent.system.OshiSystemInfoProvider;
-import dev.adrian.goral.localhiveagent.system.SystemInfoProvider;
-import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -28,23 +21,14 @@ import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Path;
 import java.time.Duration;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class LocalHiveAgentApplication extends Application {
 
     private static final Logger log = LoggerFactory.getLogger(LocalHiveAgentApplication.class);
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
 
-    private ConfigService configService;
-    private SystemInfoProvider systemInfoProvider;
-    private RegistrationClient registrationClient;
-    private AgentRegistrationService agentRegistrationService;
-    private HeartbeatScheduler heartbeatScheduler;
-    private ExecutorService backgroundExecutor;
-
+    private AgentRuntime runtime;
     private Label workerIdLabel;
     private Label apiKeyLabel;
     private Label statusLabel;
@@ -68,32 +52,17 @@ public class LocalHiveAgentApplication extends Application {
 
     @Override
     public void init() {
-        Path configPath = Path.of(System.getProperty("user.home"), ".localhive-agent", "config.json");
-
-        this.configService = new ConfigService(configPath);
-        this.systemInfoProvider = new OshiSystemInfoProvider();
-        this.registrationClient = new RegistrationClient();
-        this.agentRegistrationService = new AgentRegistrationService(
-                configService,
-                systemInfoProvider,
-                registrationClient
-        );
-        this.heartbeatScheduler = new HeartbeatScheduler(configService, registrationClient);
-        this.backgroundExecutor = Executors.newSingleThreadExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "localhive-agent-background");
-            thread.setDaemon(true);
-            return thread;
-        });
+        this.runtime = AgentRuntime.createDefault();
     }
 
     @Override
     public void start(Stage stage) {
-        AgentConfig config = configService.loadOrCreate();
-        MachineSpec machineSpec = systemInfoProvider.collectMachineSpec(config.sharedRamMb());
+        AgentConfig config = runtime.configService().loadOrCreate();
+        MachineSpec machineSpec = runtime.systemInfoProvider().collectMachineSpec(config.sharedRamMb());
         this.detectedTotalRamMb = machineSpec.totalRamMb();
 
         log.info("LocalHive Agent started");
-        log.info("Config path: {}", configService.configPath());
+        log.info("Config path: {}", runtime.configService().configPath());
         log.info("Worker registered: {}", config.hasWorkerId());
         log.info("API key configured: {}", config.hasApiKey());
         log.info("Detected machine spec: {}", machineSpec);
@@ -117,12 +86,8 @@ public class LocalHiveAgentApplication extends Application {
 
     @Override
     public void stop() {
-        if (heartbeatScheduler != null) {
-            heartbeatScheduler.close();
-        }
-
-        if (backgroundExecutor != null) {
-            backgroundExecutor.shutdownNow();
+        if (runtime != null) {
+            runtime.close();
         }
     }
 
@@ -168,7 +133,7 @@ public class LocalHiveAgentApplication extends Application {
         workerIdLabel = new Label(config.hasWorkerId() ? config.workerId().toString() : "not registered");
         apiKeyLabel = new Label(config.hasApiKey() ? "configured" : "missing");
 
-        grid.addRow(0, new Label("Config:"), new Label(configService.configPath().toString()));
+        grid.addRow(0, new Label("Config:"), new Label(runtime.configService().configPath().toString()));
         grid.addRow(1, new Label("Master URL:"), masterBaseUrlField);
         grid.addRow(2, new Label("Worker ID:"), workerIdLabel);
         grid.addRow(3, new Label("API Key status:"), apiKeyLabel);
@@ -263,7 +228,7 @@ public class LocalHiveAgentApplication extends Application {
         String apiKey = apiKeyField.getText();
         int sharedRamMb = parseSharedRamMb(sharedRamMbField.getText());
 
-        return configService.update(config -> {
+        return runtime.configService().update(config -> {
             AgentConfig updatedConfig = config
                     .withMasterBaseUrl(masterBaseUrl)
                     .withSharedRamMb(sharedRamMb);
@@ -287,7 +252,7 @@ public class LocalHiveAgentApplication extends Application {
         Task<AgentRegistrationResult> task = new Task<>() {
             @Override
             protected AgentRegistrationResult call() {
-                return agentRegistrationService.registerCurrentMachine();
+                return runtime.agentRegistrationService().registerCurrentMachine();
             }
         };
 
@@ -311,7 +276,7 @@ public class LocalHiveAgentApplication extends Application {
             log.warn("Worker registration failed", exception);
         });
 
-        backgroundExecutor.submit(task);
+        runtime.backgroundExecutor().submit(task);
     }
 
     private void sendHeartbeatNow(Button heartbeatNowButton) {
@@ -326,7 +291,7 @@ public class LocalHiveAgentApplication extends Application {
             @Override
             protected HeartbeatTickResult call() {
                 try {
-                    AgentConfig config = configService.load();
+                    AgentConfig config = runtime.configService().load();
                     validateConfigBeforeHeartbeat(config);
 
                     HeartbeatRequest request = new HeartbeatRequest(
@@ -334,7 +299,7 @@ public class LocalHiveAgentApplication extends Application {
                             config.sharedRamMb()
                     );
 
-                    HeartbeatResponse response = registrationClient.sendHeartbeat(
+                    HeartbeatResponse response = runtime.registrationClient().sendHeartbeat(
                             config.masterBaseUrl(),
                             config.workerId(),
                             config.apiKey(),
@@ -364,7 +329,7 @@ public class LocalHiveAgentApplication extends Application {
             log.warn("Heartbeat failed", exception);
         });
 
-        backgroundExecutor.submit(task);
+        runtime.backgroundExecutor().submit(task);
     }
 
     private void startHeartbeat() {
@@ -373,10 +338,10 @@ public class LocalHiveAgentApplication extends Application {
         }
 
         try {
-            AgentConfig config = configService.load();
+            AgentConfig config = runtime.configService().load();
             validateConfigBeforeHeartbeat(config);
 
-            heartbeatScheduler.start(HEARTBEAT_INTERVAL, result ->
+            runtime.heartbeatScheduler().start(HEARTBEAT_INTERVAL, result ->
                     Platform.runLater(() -> handleHeartbeatResult(result))
             );
 
@@ -384,8 +349,8 @@ public class LocalHiveAgentApplication extends Application {
             stopHeartbeatButton.setDisable(false);
             statusLabel.setText("Heartbeat scheduler started.");
         } catch (RuntimeException exception) {
-            heartbeatScheduler.stop();
-            refreshActionButtonState(configService.load());
+            runtime.heartbeatScheduler().stop();
+            refreshActionButtonState(runtime.configService().load());
 
             log.warn("Failed to start heartbeat scheduler", exception);
             statusLabel.setText("Failed to start heartbeat scheduler: " + exception.getMessage());
@@ -393,7 +358,7 @@ public class LocalHiveAgentApplication extends Application {
     }
 
     private void stopHeartbeat() {
-        heartbeatScheduler.stop();
+        runtime.heartbeatScheduler().stop();
 
         startHeartbeatButton.setDisable(false);
         stopHeartbeatButton.setDisable(true);
@@ -453,11 +418,11 @@ public class LocalHiveAgentApplication extends Application {
         }
 
         if (startHeartbeatButton != null) {
-            startHeartbeatButton.setDisable(!canUseWorkerApi || heartbeatScheduler.isRunning());
+            startHeartbeatButton.setDisable(!canUseWorkerApi || runtime.heartbeatScheduler().isRunning());
         }
 
         if (stopHeartbeatButton != null) {
-            stopHeartbeatButton.setDisable(!heartbeatScheduler.isRunning());
+            stopHeartbeatButton.setDisable(!runtime.heartbeatScheduler().isRunning());
         }
     }
 
@@ -509,7 +474,7 @@ public class LocalHiveAgentApplication extends Application {
             return;
         }
 
-        AgentConfig config = configService.load();
+        AgentConfig config = runtime.configService().load();
 
         try {
             validateConfigBeforeHeartbeat(config);
@@ -524,9 +489,9 @@ public class LocalHiveAgentApplication extends Application {
         Task<Void> task = new Task<>() {
             @Override
             protected Void call() {
-                AgentConfig currentConfig = configService.load();
+                AgentConfig currentConfig = runtime.configService().load();
 
-                registrationClient.updateAllocation(
+                runtime.registrationClient().updateAllocation(
                         currentConfig.masterBaseUrl(),
                         currentConfig.workerId(),
                         currentConfig.apiKey(),
@@ -538,7 +503,7 @@ public class LocalHiveAgentApplication extends Application {
         };
 
         task.setOnSucceeded(event -> {
-            statusLabel.setText("Allocation updated: " + configService.load().sharedRamMb() + " MB");
+            statusLabel.setText("Allocation updated: " + runtime.configService().load().sharedRamMb() + " MB");
             updateAllocationButton.setDisable(false);
         });
 
@@ -551,7 +516,7 @@ public class LocalHiveAgentApplication extends Application {
             log.warn("Allocation update failed", exception);
         });
 
-        backgroundExecutor.submit(task);
+        runtime.backgroundExecutor().submit(task);
     }
 
     private void togglePauseMode() {
@@ -559,7 +524,7 @@ public class LocalHiveAgentApplication extends Application {
             return;
         }
 
-        AgentConfig currentConfig = configService.load();
+        AgentConfig currentConfig = runtime.configService().load();
 
         try {
             validateConfigBeforeHeartbeat(currentConfig);
@@ -571,7 +536,7 @@ public class LocalHiveAgentApplication extends Application {
         boolean previousPauseState = currentConfig.pauseEnabled();
         boolean newPauseState = !previousPauseState;
 
-        AgentConfig updatedConfig = configService.update(config -> config.withPauseEnabled(newPauseState));
+        AgentConfig updatedConfig = runtime.configService().update(config -> config.withPauseEnabled(newPauseState));
         refreshConfigLabels(updatedConfig);
 
         pauseResumeButton.setDisable(true);
@@ -581,7 +546,7 @@ public class LocalHiveAgentApplication extends Application {
             @Override
             protected HeartbeatTickResult call() {
                 try {
-                    AgentConfig config = configService.load();
+                    AgentConfig config = runtime.configService().load();
                     validateConfigBeforeHeartbeat(config);
 
                     HeartbeatRequest request = new HeartbeatRequest(
@@ -589,7 +554,7 @@ public class LocalHiveAgentApplication extends Application {
                             config.sharedRamMb()
                     );
 
-                    HeartbeatResponse response = registrationClient.sendHeartbeat(
+                    HeartbeatResponse response = runtime.registrationClient().sendHeartbeat(
                             config.masterBaseUrl(),
                             config.workerId(),
                             config.apiKey(),
@@ -612,7 +577,7 @@ public class LocalHiveAgentApplication extends Application {
                         ? "Gamer Mode enabled. Worker is paused."
                         : "Gamer Mode disabled. Worker is active.");
             } else {
-                AgentConfig rolledBackConfig = configService.update(config -> config.withPauseEnabled(previousPauseState));
+                AgentConfig rolledBackConfig = runtime.configService().update(config -> config.withPauseEnabled(previousPauseState));
                 refreshConfigLabels(rolledBackConfig);
 
                 statusLabel.setText("Gamer Mode change failed: " + result.error().getMessage());
@@ -620,13 +585,13 @@ public class LocalHiveAgentApplication extends Application {
             }
 
             pauseResumeButton.setDisable(false);
-            refreshActionButtonState(configService.load());
+            refreshActionButtonState(runtime.configService().load());
         });
 
         task.setOnFailed(event -> {
             Throwable exception = task.getException();
 
-            AgentConfig rolledBackConfig = configService.update(config -> config.withPauseEnabled(previousPauseState));
+            AgentConfig rolledBackConfig = runtime.configService().update(config -> config.withPauseEnabled(previousPauseState));
             refreshConfigLabels(rolledBackConfig);
 
             statusLabel.setText("Gamer Mode change failed: " + exception.getMessage());
@@ -636,7 +601,7 @@ public class LocalHiveAgentApplication extends Application {
             log.warn("Gamer Mode change failed", exception);
         });
 
-        backgroundExecutor.submit(task);
+        runtime.backgroundExecutor().submit(task);
     }
 
     private static String getPauseResumeButtonText(boolean pauseEnabled) {
