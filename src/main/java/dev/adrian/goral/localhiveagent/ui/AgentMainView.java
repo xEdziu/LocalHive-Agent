@@ -37,6 +37,7 @@ public class AgentMainView {
     private Button heartbeatNowButton;
     private Button startHeartbeatButton;
     private Button stopHeartbeatButton;
+    private Button updateHardwareSpecButton;
 
     public AgentMainView(AgentConfig initialConfig, MachineSpec machineSpec, Path configPath) {
         this.initialConfig = initialConfig;
@@ -101,6 +102,7 @@ public class AgentMainView {
         heartbeatNowButton.setDisable(!canUseWorkerApi);
         startHeartbeatButton.setDisable(!canUseWorkerApi || heartbeatRunning);
         stopHeartbeatButton.setDisable(!heartbeatRunning);
+        updateHardwareSpecButton.setDisable(!canUseWorkerApi);
     }
 
     public Button saveConfigButton() {
@@ -129,6 +131,10 @@ public class AgentMainView {
 
     public Button stopHeartbeatButton() {
         return stopHeartbeatButton;
+    }
+
+    public Button updateHardwareSpecButton() {
+        return updateHardwareSpecButton;
     }
 
     private GridPane createConfigSection() {
@@ -214,6 +220,7 @@ public class AgentMainView {
         heartbeatNowButton = new Button("Send Heartbeat Now");
         startHeartbeatButton = new Button("Start Heartbeat");
         stopHeartbeatButton = new Button("Stop Heartbeat");
+        updateHardwareSpecButton = new Button("Update Hardware Spec");
 
         statusLabel = new Label("Ready.");
         lastHeartbeatLabel = new Label("Last heartbeat: never");
@@ -222,6 +229,7 @@ public class AgentMainView {
         box.getChildren().addAll(
                 saveConfigButton,
                 updateAllocationButton,
+                updateHardwareSpecButton,
                 pauseResumeButton,
                 registerButton,
                 heartbeatNowButton,

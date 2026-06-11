@@ -131,6 +131,36 @@ public class RegistrationClient {
         }
     }
 
+    public void updateHardwareSpec(
+            String masterBaseUrl,
+            UUID workerId,
+            String apiKey,
+            WorkerHardwareUpdateRequest request
+    ) {
+        validateWorkerIdentity(workerId, apiKey);
+
+        String requestBody = writeJson(request);
+
+        HttpRequest httpRequest = HttpRequest.newBuilder()
+                .uri(buildUri(masterBaseUrl, "/api/workers/" + workerId + "/spec"))
+                .timeout(requestTimeout)
+                .header(API_KEY_HEADER, apiKey)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .method("PATCH", HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
+                .build();
+
+        HttpResponse<String> response = send(httpRequest);
+
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new MasterClientException(
+                    "Hardware spec update failed.",
+                    response.statusCode(),
+                    response.body()
+            );
+        }
+    }
+
     private HttpResponse<String> send(HttpRequest request) {
         try {
             return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));

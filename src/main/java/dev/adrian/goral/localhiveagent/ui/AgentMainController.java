@@ -6,6 +6,8 @@ import dev.adrian.goral.localhiveagent.heartbeat.HeartbeatTickResult;
 import dev.adrian.goral.localhiveagent.master.AgentRegistrationResult;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
+import dev.adrian.goral.localhiveagent.master.dto.WorkerHardwareUpdateRequest;
+import dev.adrian.goral.localhiveagent.system.MachineSpec;
 import dev.adrian.goral.localhiveagent.validation.AgentConfigValidator;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -41,6 +43,7 @@ public class AgentMainController {
         view.heartbeatNowButton().setOnAction(event -> sendHeartbeatNow());
         view.startHeartbeatButton().setOnAction(event -> startHeartbeat());
         view.stopHeartbeatButton().setOnAction(event -> stopHeartbeat());
+        view.updateHardwareSpecButton().setOnAction(event -> updateHardwareSpec());
     }
 
     private boolean saveConfigFromFields() {
@@ -365,6 +368,63 @@ public class AgentMainController {
                 canUseWorkerApi,
                 runtime.heartbeatScheduler().isRunning()
         );
+    }
+
+    private void updateHardwareSpec() {
+        if (!saveConfigFromFields()) {
+            return;
+        }
+
+        AgentConfig config = runtime.configService().load();
+
+        try {
+            AgentConfigValidator.validateWorkerApiReady(config);
+        } catch (RuntimeException exception) {
+            view.setStatus("Cannot update hardware spec: " + exception.getMessage());
+            return;
+        }
+
+        view.updateHardwareSpecButton().setDisable(true);
+        view.setStatus("Updating hardware spec...");
+
+        Task<Void> task = new Task<>() {
+            @Override
+            protected Void call() {
+                AgentConfig currentConfig = runtime.configService().load();
+
+                MachineSpec machineSpec = runtime.systemInfoProvider()
+                        .collectMachineSpec(currentConfig.sharedRamMb());
+
+                WorkerHardwareUpdateRequest request = WorkerHardwareUpdateRequest.fromMachineSpec(machineSpec);
+
+                runtime.registrationClient().updateHardwareSpec(
+                        currentConfig.masterBaseUrl(),
+                        currentConfig.workerId(),
+                        currentConfig.apiKey(),
+                        request
+                );
+
+                return null;
+            }
+        };
+
+        task.setOnSucceeded(event -> {
+            view.setStatus("Hardware spec updated.");
+            view.updateHardwareSpecButton().setDisable(false);
+            refreshActionButtonState(runtime.configService().load());
+        });
+
+        task.setOnFailed(event -> {
+            Throwable exception = task.getException();
+
+            view.setStatus("Hardware spec update failed: " + exception.getMessage());
+            view.updateHardwareSpecButton().setDisable(false);
+            refreshActionButtonState(runtime.configService().load());
+
+            log.warn("Hardware spec update failed", exception);
+        });
+
+        runtime.backgroundExecutor().submit(task);
     }
 
 }
