@@ -6,6 +6,7 @@ import dev.adrian.goral.localhiveagent.heartbeat.HeartbeatTickResult;
 import dev.adrian.goral.localhiveagent.master.AgentRegistrationResult;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
+import dev.adrian.goral.localhiveagent.validation.AgentConfigValidator;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 import org.slf4j.Logger;
@@ -64,7 +65,10 @@ public class AgentMainController {
     private AgentConfig saveConfigFromFieldsInternal() {
         String masterBaseUrl = view.masterBaseUrlInput();
         String apiKey = view.apiKeyInput();
-        int sharedRamMb = parseSharedRamMb(view.sharedRamMbInput());
+        int sharedRamMb = AgentConfigValidator.parseSharedRamMb(
+                view.sharedRamMbInput(),
+                view.detectedTotalRamMb()
+        );
 
         return runtime.configService().update(config -> {
             AgentConfig updatedConfig = config
@@ -161,7 +165,7 @@ public class AgentMainController {
 
         try {
             AgentConfig config = runtime.configService().load();
-            validateConfigBeforeHeartbeat(config);
+            AgentConfigValidator.validateWorkerApiReady(config);
 
             runtime.heartbeatScheduler().start(HEARTBEAT_INTERVAL, result ->
                     Platform.runLater(() -> handleHeartbeatResult(result))
@@ -193,7 +197,7 @@ public class AgentMainController {
         AgentConfig config = runtime.configService().load();
 
         try {
-            validateConfigBeforeHeartbeat(config);
+            AgentConfigValidator.validateWorkerApiReady(config);
         } catch (RuntimeException exception) {
             view.setStatus("Cannot update allocation: " + exception.getMessage());
             return;
@@ -245,7 +249,7 @@ public class AgentMainController {
         AgentConfig currentConfig = runtime.configService().load();
 
         try {
-            validateConfigBeforeHeartbeat(currentConfig);
+            AgentConfigValidator.validateWorkerApiReady(currentConfig);
         } catch (RuntimeException exception) {
             view.setStatus("Cannot change Gamer Mode: " + exception.getMessage());
             return;
@@ -310,7 +314,7 @@ public class AgentMainController {
     private HeartbeatTickResult executeHeartbeatOnce() {
         try {
             AgentConfig config = runtime.configService().load();
-            validateConfigBeforeHeartbeat(config);
+            AgentConfigValidator.validateWorkerApiReady(config);
 
             HeartbeatRequest request = new HeartbeatRequest(
                     config.pauseEnabled(),
@@ -363,39 +367,4 @@ public class AgentMainController {
         );
     }
 
-    private static void validateConfigBeforeHeartbeat(AgentConfig config) {
-        if (!config.hasMasterBaseUrl()) {
-            throw new IllegalStateException("Master base URL is required before heartbeat.");
-        }
-
-        if (!config.hasWorkerId()) {
-            throw new IllegalStateException("Worker ID is required before heartbeat.");
-        }
-
-        if (!config.hasApiKey()) {
-            throw new IllegalStateException("API key is required before heartbeat.");
-        }
-    }
-
-    private int parseSharedRamMb(String value) {
-        if (value == null || value.isBlank()) {
-            return 0;
-        }
-
-        try {
-            int sharedRamMb = Integer.parseInt(value.trim());
-
-            if (sharedRamMb < 0) {
-                throw new IllegalArgumentException("Shared RAM cannot be negative.");
-            }
-
-            if (sharedRamMb > view.detectedTotalRamMb()) {
-                throw new IllegalArgumentException("Shared RAM cannot be greater than total RAM.");
-            }
-
-            return sharedRamMb;
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("Shared RAM must be a valid integer.", exception);
-        }
-    }
 }
