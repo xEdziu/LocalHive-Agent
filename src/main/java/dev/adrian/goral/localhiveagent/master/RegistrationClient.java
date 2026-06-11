@@ -52,13 +52,7 @@ public class RegistrationClient {
 
         HttpResponse<String> response = send(httpRequest);
 
-        if (response.statusCode() != 201) {
-            throw new MasterClientException(
-                    "Worker registration failed.",
-                    response.statusCode(),
-                    response.body()
-            );
-        }
+        ensureSuccessfulResponse(response, 201, "Worker registration");
 
         WorkerRegistrationResponse registrationResponse = readJson(response.body(), WorkerRegistrationResponse.class);
 
@@ -86,13 +80,7 @@ public class RegistrationClient {
 
         HttpResponse<String> response = send(httpRequest);
 
-        if (response.statusCode() != 200) {
-            throw new MasterClientException(
-                    "Heartbeat failed.",
-                    response.statusCode(),
-                    response.body()
-            );
-        }
+        ensureSuccessfulResponse(response, 200, "Heartbeat");
 
         if (response.body() == null || response.body().isBlank()) {
             return new HeartbeatResponse("success");
@@ -122,13 +110,7 @@ public class RegistrationClient {
 
         HttpResponse<String> response = send(httpRequest);
 
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new MasterClientException(
-                    "Allocation update failed.",
-                    response.statusCode(),
-                    response.body()
-            );
-        }
+        ensureSuccessfulResponse(response, "Allocation update");
     }
 
     public void updateHardwareSpec(
@@ -152,13 +134,7 @@ public class RegistrationClient {
 
         HttpResponse<String> response = send(httpRequest);
 
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new MasterClientException(
-                    "Hardware spec update failed.",
-                    response.statusCode(),
-                    response.body()
-            );
-        }
+        ensureSuccessfulResponse(response, "Hardware spec update");
     }
 
     private HttpResponse<String> send(HttpRequest request) {
@@ -166,9 +142,19 @@ public class RegistrationClient {
             return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new MasterClientException("HTTP request was interrupted.", exception);
+            throw new MasterClientException(
+                    "HTTP request was interrupted.",
+                    "HTTP request was interrupted.",
+                    exception
+            );
         } catch (IOException exception) {
-            throw new MasterClientException("HTTP request failed.", exception);
+            String userMessage = MasterClientErrorMapper.mapConnectionError("Master communication", exception);
+
+            throw new MasterClientException(
+                    "HTTP request failed.",
+                    userMessage,
+                    exception
+            );
         }
     }
 
@@ -176,7 +162,11 @@ public class RegistrationClient {
         try {
             return jsonMapper.writeValueAsString(value);
         } catch (RuntimeException exception) {
-            throw new MasterClientException("Failed to serialize JSON request.", exception);
+            throw new MasterClientException(
+                    "Failed to serialize JSON request.",
+                    "Agent failed to prepare the request payload.",
+                    exception
+            );
         }
     }
 
@@ -184,7 +174,11 @@ public class RegistrationClient {
         try {
             return jsonMapper.readValue(responseBody, responseType);
         } catch (RuntimeException exception) {
-            throw new MasterClientException("Failed to deserialize JSON response.", exception);
+            throw new MasterClientException(
+                    "Failed to deserialize JSON response.",
+                    "Master returned a response that the Agent could not understand.",
+                    exception
+            );
         }
     }
 
@@ -217,5 +211,37 @@ public class RegistrationClient {
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalArgumentException("API key cannot be blank.");
         }
+    }
+
+    private void ensureSuccessfulResponse(HttpResponse<String> response, int expectedStatusCode, String operation) {
+        if (response.statusCode() == expectedStatusCode) {
+            return;
+        }
+
+        throwHttpError(response, operation);
+    }
+
+    private void ensureSuccessfulResponse(HttpResponse<String> response, String operation) {
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return;
+        }
+
+        throwHttpError(response, operation);
+    }
+
+    private void throwHttpError(HttpResponse<String> response, String operation) {
+        String userMessage = MasterClientErrorMapper.mapHttpError(
+                operation,
+                response.statusCode(),
+                response.body(),
+                jsonMapper
+        );
+
+        throw new MasterClientException(
+                operation + " failed.",
+                userMessage,
+                response.statusCode(),
+                response.body()
+        );
     }
 }
