@@ -8,6 +8,7 @@ module dev.adrian.goral.localhiveagent {
 
     requires com.github.oshi;
     requires org.slf4j;
+    requires com.sun.jna.platform;
 
     requires tools.jackson.databind;
 

@@ -54,11 +54,15 @@ public class AgentMainController {
             AgentConfig updatedConfig = saveConfigFromFieldsInternal();
 
             refreshConfigLabels(updatedConfig);
-            view.setStatus("Config saved.");
 
-            if (!view.apiKeyInput().isBlank()) {
+            boolean apiKeyWasProvided = !view.apiKeyInput().isBlank();
+
+            if (apiKeyWasProvided) {
                 view.clearApiKeyInput();
             }
+
+            view.setStatus("Config saved.");
+            autoStartHeartbeatIfReady(updatedConfig);
 
             return true;
         } catch (RuntimeException exception) {
@@ -71,22 +75,20 @@ public class AgentMainController {
     private AgentConfig saveConfigFromFieldsInternal() {
         String masterBaseUrl = view.masterBaseUrlInput();
         String apiKey = view.apiKeyInput();
+
         int sharedRamMb = AgentConfigValidator.parseSharedRamMb(
                 view.sharedRamMbInput(),
                 view.detectedTotalRamMb()
         );
 
-        return runtime.configService().update(config -> {
-            AgentConfig updatedConfig = config
-                    .withMasterBaseUrl(masterBaseUrl)
-                    .withSharedRamMb(sharedRamMb);
+        if (apiKey != null && !apiKey.isBlank()) {
+            runtime.credentialStore().saveApiKey(apiKey);
+        }
 
-            if (apiKey != null && !apiKey.isBlank()) {
-                updatedConfig = updatedConfig.withApiKey(apiKey);
-            }
-
-            return updatedConfig;
-        });
+        return runtime.configService().update(config -> config
+                .withMasterBaseUrl(masterBaseUrl)
+                .withSharedRamMb(sharedRamMb)
+        );
     }
 
     private void registerWithMaster() {
@@ -171,7 +173,7 @@ public class AgentMainController {
 
         try {
             AgentConfig config = runtime.configService().load();
-            AgentConfigValidator.validateWorkerApiReady(config);
+            AgentConfigValidator.validateWorkerApiReady(config, hasStoredApiKey());
 
             runtime.heartbeatScheduler().start(HEARTBEAT_INTERVAL, result ->
                     Platform.runLater(() -> handleHeartbeatResult(result))
@@ -203,7 +205,7 @@ public class AgentMainController {
         AgentConfig config = runtime.configService().load();
 
         try {
-            AgentConfigValidator.validateWorkerApiReady(config);
+            AgentConfigValidator.validateWorkerApiReady(config, hasStoredApiKey());
         } catch (RuntimeException exception) {
             view.setStatus("Cannot update allocation: " + exception.getMessage());
             return;
@@ -220,7 +222,7 @@ public class AgentMainController {
                 runtime.registrationClient().updateAllocation(
                         currentConfig.masterBaseUrl(),
                         currentConfig.workerId(),
-                        currentConfig.apiKey(),
+                        loadRequiredApiKey(),
                         currentConfig.sharedRamMb()
                 );
 
@@ -255,7 +257,7 @@ public class AgentMainController {
         AgentConfig currentConfig = runtime.configService().load();
 
         try {
-            AgentConfigValidator.validateWorkerApiReady(currentConfig);
+            AgentConfigValidator.validateWorkerApiReady(currentConfig, hasStoredApiKey());
         } catch (RuntimeException exception) {
             view.setStatus("Cannot change Gamer Mode: " + exception.getMessage());
             return;
@@ -320,7 +322,7 @@ public class AgentMainController {
     private HeartbeatTickResult executeHeartbeatOnce() {
         try {
             AgentConfig config = runtime.configService().load();
-            AgentConfigValidator.validateWorkerApiReady(config);
+            AgentConfigValidator.validateWorkerApiReady(config, hasStoredApiKey());
 
             HeartbeatRequest request = new HeartbeatRequest(
                     config.pauseEnabled(),
@@ -330,7 +332,7 @@ public class AgentMainController {
             HeartbeatResponse response = runtime.registrationClient().sendHeartbeat(
                     config.masterBaseUrl(),
                     config.workerId(),
-                    config.apiKey(),
+                    loadRequiredApiKey(),
                     request
             );
 
@@ -355,7 +357,7 @@ public class AgentMainController {
 
     private void refreshConfigLabels(AgentConfig config) {
         Platform.runLater(() -> {
-            view.refreshConfig(config);
+            view.refreshConfig(config, hasStoredApiKey());
             refreshActionButtonState(config);
         });
     }
@@ -364,7 +366,7 @@ public class AgentMainController {
         boolean canRegister = config.hasMasterBaseUrl() && !config.hasWorkerId();
         boolean canUseWorkerApi = config.hasMasterBaseUrl()
                 && config.hasWorkerId()
-                && config.hasApiKey();
+                && hasStoredApiKey();
 
         view.refreshActionButtonState(
                 canRegister,
@@ -381,7 +383,7 @@ public class AgentMainController {
         AgentConfig config = runtime.configService().load();
 
         try {
-            AgentConfigValidator.validateWorkerApiReady(config);
+            AgentConfigValidator.validateWorkerApiReady(config, hasStoredApiKey());
         } catch (RuntimeException exception) {
             view.setStatus("Cannot update hardware spec: " + exception.getMessage());
             return;
@@ -403,7 +405,7 @@ public class AgentMainController {
                 runtime.registrationClient().updateHardwareSpec(
                         currentConfig.masterBaseUrl(),
                         currentConfig.workerId(),
-                        currentConfig.apiKey(),
+                        loadRequiredApiKey(),
                         request
                 );
 
@@ -431,8 +433,12 @@ public class AgentMainController {
     }
 
     private void autoStartHeartbeatIfReady(AgentConfig config) {
+        if (runtime.heartbeatScheduler().isRunning()) {
+            return;
+        }
+
         try {
-            AgentConfigValidator.validateWorkerApiReady(config);
+            AgentConfigValidator.validateWorkerApiReady(config, hasStoredApiKey());
 
             runtime.heartbeatScheduler().start(HEARTBEAT_INTERVAL, result ->
                     Platform.runLater(() -> handleHeartbeatResult(result))
@@ -442,9 +448,19 @@ public class AgentMainController {
             view.setStatus("Heartbeat scheduler started automatically.");
         } catch (RuntimeException exception) {
             refreshActionButtonState(config);
-            view.setStatus("Heartbeat scheduler is not running. Complete agent configuration first.");
             log.info("Heartbeat scheduler was not started automatically: {}", exception.getMessage());
         }
     }
+
+    private boolean hasStoredApiKey() {
+        return runtime.credentialStore().hasApiKey();
+    }
+
+    private String loadRequiredApiKey() {
+        return runtime.credentialStore()
+                .loadApiKey()
+                .orElseThrow(() -> new IllegalStateException("API key is required."));
+    }
+
 
 }

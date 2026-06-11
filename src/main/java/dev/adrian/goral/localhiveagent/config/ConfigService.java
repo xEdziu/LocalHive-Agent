@@ -2,6 +2,7 @@ package dev.adrian.goral.localhiveagent.config;
 
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.DeserializationFeature;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -23,6 +24,7 @@ public class ConfigService {
         this.configPath = configPath;
         this.jsonMapper = JsonMapper.builder()
                 .enable(SerializationFeature.INDENT_OUTPUT)
+                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .build();
         this.lock = new ReentrantReadWriteLock();
     }
@@ -99,10 +101,6 @@ public class ConfigService {
 
     public AgentConfig updateWorkerId(UUID workerId) {
         return update(config -> config.withWorkerId(workerId));
-    }
-
-    public AgentConfig updateApiKey(String apiKey) {
-        return update(config -> config.withApiKey(apiKey));
     }
 
     public AgentConfig updateSharedRamMb(int sharedRamMb) {

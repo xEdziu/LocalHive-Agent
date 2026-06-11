@@ -6,6 +6,8 @@ import dev.adrian.goral.localhiveagent.master.AgentRegistrationService;
 import dev.adrian.goral.localhiveagent.master.RegistrationClient;
 import dev.adrian.goral.localhiveagent.system.OshiSystemInfoProvider;
 import dev.adrian.goral.localhiveagent.system.SystemInfoProvider;
+import dev.adrian.goral.localhiveagent.security.CredentialStore;
+import dev.adrian.goral.localhiveagent.security.CredentialStoreFactory;
 
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
@@ -19,6 +21,7 @@ public final class AgentRuntime implements AutoCloseable {
     private final AgentRegistrationService agentRegistrationService;
     private final HeartbeatScheduler heartbeatScheduler;
     private final ExecutorService backgroundExecutor;
+    private final CredentialStore credentialStore;
 
     private AgentRuntime(
             ConfigService configService,
@@ -26,7 +29,8 @@ public final class AgentRuntime implements AutoCloseable {
             RegistrationClient registrationClient,
             AgentRegistrationService agentRegistrationService,
             HeartbeatScheduler heartbeatScheduler,
-            ExecutorService backgroundExecutor
+            ExecutorService backgroundExecutor,
+            CredentialStore credentialStore
     ) {
         this.configService = configService;
         this.systemInfoProvider = systemInfoProvider;
@@ -34,14 +38,17 @@ public final class AgentRuntime implements AutoCloseable {
         this.agentRegistrationService = agentRegistrationService;
         this.heartbeatScheduler = heartbeatScheduler;
         this.backgroundExecutor = backgroundExecutor;
+        this.credentialStore = credentialStore;
     }
 
     public static AgentRuntime createDefault() {
-        Path configPath = Path.of(System.getProperty("user.home"), ".localhive-agent", "config.json");
+        Path configDirectory = Path.of(System.getProperty("user.home"), ".localhive-agent");
+        Path configPath = configDirectory.resolve("config.json");
 
         ConfigService configService = new ConfigService(configPath);
         SystemInfoProvider systemInfoProvider = new OshiSystemInfoProvider();
         RegistrationClient registrationClient = new RegistrationClient();
+        CredentialStore credentialStore = CredentialStoreFactory.createDefault(configDirectory);
 
         AgentRegistrationService agentRegistrationService = new AgentRegistrationService(
                 configService,
@@ -49,7 +56,11 @@ public final class AgentRuntime implements AutoCloseable {
                 registrationClient
         );
 
-        HeartbeatScheduler heartbeatScheduler = new HeartbeatScheduler(configService, registrationClient);
+        HeartbeatScheduler heartbeatScheduler = new HeartbeatScheduler(
+                configService,
+                credentialStore,
+                registrationClient
+        );
 
         ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "localhive-agent-background");
@@ -57,13 +68,15 @@ public final class AgentRuntime implements AutoCloseable {
             return thread;
         });
 
+
         return new AgentRuntime(
                 configService,
                 systemInfoProvider,
                 registrationClient,
                 agentRegistrationService,
                 heartbeatScheduler,
-                backgroundExecutor
+                backgroundExecutor,
+                credentialStore
         );
     }
 
@@ -89,6 +102,10 @@ public final class AgentRuntime implements AutoCloseable {
 
     public ExecutorService backgroundExecutor() {
         return backgroundExecutor;
+    }
+
+    public CredentialStore credentialStore() {
+        return credentialStore;
     }
 
     @Override

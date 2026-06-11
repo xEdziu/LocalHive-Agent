@@ -18,6 +18,7 @@ public class AgentMainView {
     private final MachineSpec machineSpec;
     private final Path configPath;
     private final int detectedTotalRamMb;
+    private final boolean initialApiKeyConfigured;
 
     private Label workerIdLabel;
     private Label apiKeyLabel;
@@ -39,11 +40,17 @@ public class AgentMainView {
     private Button stopHeartbeatButton;
     private Button updateHardwareSpecButton;
 
-    public AgentMainView(AgentConfig initialConfig, MachineSpec machineSpec, Path configPath) {
+    public AgentMainView(
+            AgentConfig initialConfig,
+            MachineSpec machineSpec,
+            Path configPath,
+            boolean initialApiKeyConfigured
+    ) {
         this.initialConfig = initialConfig;
         this.machineSpec = machineSpec;
         this.configPath = configPath;
         this.detectedTotalRamMb = machineSpec.totalRamMb();
+        this.initialApiKeyConfigured = initialApiKeyConfigured;
     }
 
     public VBox createRoot() {
@@ -88,9 +95,9 @@ public class AgentMainView {
         lastHeartbeatLabel.setText(value);
     }
 
-    public void refreshConfig(AgentConfig config) {
+    public void refreshConfig(AgentConfig config, boolean apiKeyConfigured) {
         workerIdLabel.setText(config.hasWorkerId() ? config.workerId().toString() : "not registered");
-        apiKeyLabel.setText(config.hasApiKey() ? "configured" : "missing");
+        apiKeyLabel.setText(apiKeyConfigured ? "configured" : "missing");
         pauseStatusLabel.setText(String.valueOf(config.pauseEnabled()));
         pauseResumeButton.setText(getPauseResumeButtonText(config.pauseEnabled()));
     }
@@ -174,7 +181,7 @@ public class AgentMainView {
         });
 
         apiKeyField = new PasswordField();
-        apiKeyField.setPromptText(initialConfig.hasApiKey()
+        apiKeyField.setPromptText(initialApiKeyConfigured
                 ? "API key is configured"
                 : "Paste API key after approval");
 
@@ -182,7 +189,7 @@ public class AgentMainView {
                 ? initialConfig.workerId().toString()
                 : "not registered");
 
-        apiKeyLabel = new Label(initialConfig.hasApiKey() ? "configured" : "missing");
+        apiKeyLabel = new Label(initialApiKeyConfigured ? "configured" : "missing");
         pauseStatusLabel = new Label(String.valueOf(initialConfig.pauseEnabled()));
 
         grid.addRow(0, new Label("Config:"), new Label(configPath.toString()));

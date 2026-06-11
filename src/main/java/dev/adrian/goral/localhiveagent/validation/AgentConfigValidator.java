@@ -7,7 +7,7 @@ public final class AgentConfigValidator {
     private AgentConfigValidator() {
     }
 
-    public static void validateWorkerApiReady(AgentConfig config) {
+    public static void validateWorkerApiReady(AgentConfig config, boolean hasApiKey) {
         if (config == null) {
             throw new IllegalStateException("Agent config is required.");
         }
@@ -20,7 +20,7 @@ public final class AgentConfigValidator {
             throw new IllegalStateException("Worker ID is required.");
         }
 
-        if (!config.hasApiKey()) {
+        if (!hasApiKey) {
             throw new IllegalStateException("API key is required.");
         }
     }

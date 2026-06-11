@@ -5,13 +5,12 @@ import java.util.UUID;
 public record AgentConfig(
         String masterBaseUrl,
         UUID workerId,
-        String apiKey,
         int sharedRamMb,
         boolean pauseEnabled
 ) {
 
     public static AgentConfig empty() {
-        return new AgentConfig("", null, "", 0, false);
+        return new AgentConfig("", null, 0, false);
     }
 
     public boolean hasMasterBaseUrl() {
@@ -22,15 +21,10 @@ public record AgentConfig(
         return workerId != null;
     }
 
-    public boolean hasApiKey() {
-        return apiKey != null && !apiKey.isBlank();
-    }
-
     public AgentConfig withMasterBaseUrl(String masterBaseUrl) {
         return new AgentConfig(
                 normalizeText(masterBaseUrl),
                 workerId,
-                apiKey,
                 sharedRamMb,
                 pauseEnabled
         );
@@ -40,17 +34,6 @@ public record AgentConfig(
         return new AgentConfig(
                 masterBaseUrl,
                 workerId,
-                apiKey,
-                sharedRamMb,
-                pauseEnabled
-        );
-    }
-
-    public AgentConfig withApiKey(String apiKey) {
-        return new AgentConfig(
-                masterBaseUrl,
-                workerId,
-                normalizeText(apiKey),
                 sharedRamMb,
                 pauseEnabled
         );
@@ -64,7 +47,6 @@ public record AgentConfig(
         return new AgentConfig(
                 masterBaseUrl,
                 workerId,
-                apiKey,
                 sharedRamMb,
                 pauseEnabled
         );
@@ -74,7 +56,6 @@ public record AgentConfig(
         return new AgentConfig(
                 masterBaseUrl,
                 workerId,
-                apiKey,
                 sharedRamMb,
                 pauseEnabled
         );

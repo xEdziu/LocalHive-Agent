@@ -5,6 +5,7 @@ import dev.adrian.goral.localhiveagent.config.ConfigService;
 import dev.adrian.goral.localhiveagent.master.RegistrationClient;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
+import dev.adrian.goral.localhiveagent.security.CredentialStore;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -21,12 +22,15 @@ public final class HeartbeatScheduler implements AutoCloseable {
     private final RegistrationClient registrationClient;
     private final ScheduledExecutorService executor;
     private final AtomicBoolean running;
+    private final CredentialStore credentialStore;
 
     private volatile ScheduledFuture<?> scheduledTask;
 
-    public HeartbeatScheduler(ConfigService configService, RegistrationClient registrationClient) {
+    public HeartbeatScheduler(
+            ConfigService configService, CredentialStore credentialStore, RegistrationClient registrationClient) {
         this.configService = Objects.requireNonNull(configService);
         this.registrationClient = Objects.requireNonNull(registrationClient);
+        this.credentialStore = Objects.requireNonNull(credentialStore);
         this.executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "localhive-heartbeat");
             thread.setDaemon(true);
@@ -86,6 +90,9 @@ public final class HeartbeatScheduler implements AutoCloseable {
             AgentConfig config = configService.load();
             validateConfigBeforeHeartbeat(config);
 
+            String apiKey = credentialStore.loadApiKey()
+                    .orElseThrow(() -> new IllegalStateException("API key is required."));
+
             HeartbeatRequest request = new HeartbeatRequest(
                     config.pauseEnabled(),
                     config.sharedRamMb()
@@ -94,7 +101,7 @@ public final class HeartbeatScheduler implements AutoCloseable {
             HeartbeatResponse response = registrationClient.sendHeartbeat(
                     config.masterBaseUrl(),
                     config.workerId(),
-                    config.apiKey(),
+                    apiKey,
                     request
             );
 
@@ -111,10 +118,6 @@ public final class HeartbeatScheduler implements AutoCloseable {
 
         if (!config.hasWorkerId()) {
             throw new IllegalStateException("Worker ID is required before heartbeat.");
-        }
-
-        if (!config.hasApiKey()) {
-            throw new IllegalStateException("API key is required before heartbeat.");
         }
     }
 }

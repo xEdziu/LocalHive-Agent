@@ -30,13 +30,17 @@ public class LocalHiveAgentApplication extends Application {
         log.info("LocalHive Agent started");
         log.info("Config path: {}", runtime.configService().configPath());
         log.info("Worker registered: {}", config.hasWorkerId());
-        log.info("API key configured: {}", config.hasApiKey());
+        log.info("API key configured: {}", runtime.credentialStore().hasApiKey());
+        if (dev.adrian.goral.localhiveagent.security.CredentialStoreFactory.isUsingInsecureFallback()) {
+            log.warn("Using insecure file-based credential store. This is intended for development only.");
+        }
         log.info("Detected machine spec: {}", machineSpec);
 
         AgentMainView view = new AgentMainView(
                 config,
                 machineSpec,
-                runtime.configService().configPath()
+                runtime.configService().configPath(),
+                runtime.credentialStore().hasApiKey()
         );
 
         AgentMainController controller = new AgentMainController(runtime, view);
