@@ -32,7 +32,10 @@ public class AgentMainController {
 
     public void initialize() {
         wireViewActions();
-        refreshActionButtonState(runtime.configService().loadOrCreate());
+
+        AgentConfig config = runtime.configService().loadOrCreate();
+        refreshActionButtonState(config);
+        autoStartHeartbeatIfReady(config);
     }
 
     private void wireViewActions() {
@@ -425,6 +428,23 @@ public class AgentMainController {
         });
 
         runtime.backgroundExecutor().submit(task);
+    }
+
+    private void autoStartHeartbeatIfReady(AgentConfig config) {
+        try {
+            AgentConfigValidator.validateWorkerApiReady(config);
+
+            runtime.heartbeatScheduler().start(HEARTBEAT_INTERVAL, result ->
+                    Platform.runLater(() -> handleHeartbeatResult(result))
+            );
+
+            refreshActionButtonState(config);
+            view.setStatus("Heartbeat scheduler started automatically.");
+        } catch (RuntimeException exception) {
+            refreshActionButtonState(config);
+            view.setStatus("Heartbeat scheduler is not running. Complete agent configuration first.");
+            log.info("Heartbeat scheduler was not started automatically: {}", exception.getMessage());
+        }
     }
 
 }
