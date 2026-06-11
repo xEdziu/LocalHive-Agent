@@ -6,18 +6,13 @@ import dev.adrian.goral.localhiveagent.master.AgentRegistrationResult;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
 import dev.adrian.goral.localhiveagent.system.MachineSpec;
+import dev.adrian.goral.localhiveagent.ui.AgentMainView;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.scene.Scene;
-import javafx.scene.control.Button;
-import javafx.scene.control.Label;
-import javafx.scene.control.PasswordField;
-import javafx.scene.control.TextField;
-import javafx.scene.control.Slider;
-import javafx.scene.layout.GridPane;
-import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
+import javafx.scene.Parent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,25 +24,7 @@ public class LocalHiveAgentApplication extends Application {
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
 
     private AgentRuntime runtime;
-    private Label workerIdLabel;
-    private Label apiKeyLabel;
-    private Label statusLabel;
-    private Label lastHeartbeatLabel;
-
-    private TextField masterBaseUrlField;
-    private TextField sharedRamMbField;
-    private PasswordField apiKeyField;
-
-    private Button registerButton;
-    private Button startHeartbeatButton;
-    private Button stopHeartbeatButton;
-    private Button heartbeatNowButton;
-    private Slider sharedRamSlider;
-    private Button updateAllocationButton;
-    private int detectedTotalRamMb;
-
-    private Label pauseStatusLabel;
-    private Button pauseResumeButton;
+    private AgentMainView view;
 
 
     @Override
@@ -59,7 +36,6 @@ public class LocalHiveAgentApplication extends Application {
     public void start(Stage stage) {
         AgentConfig config = runtime.configService().loadOrCreate();
         MachineSpec machineSpec = runtime.systemInfoProvider().collectMachineSpec(config.sharedRamMb());
-        this.detectedTotalRamMb = machineSpec.totalRamMb();
 
         log.info("LocalHive Agent started");
         log.info("Config path: {}", runtime.configService().configPath());
@@ -67,15 +43,16 @@ public class LocalHiveAgentApplication extends Application {
         log.info("API key configured: {}", config.hasApiKey());
         log.info("Detected machine spec: {}", machineSpec);
 
-        VBox root = new VBox(16);
-        root.setStyle("-fx-padding: 24;");
-
-        root.getChildren().addAll(
-                new Label("LocalHive Agent"),
-                createConfigSection(config),
-                createMachineSpecSection(machineSpec),
-                createActionSection(config)
+        this.view = new AgentMainView(
+                config,
+                machineSpec,
+                runtime.configService().configPath()
         );
+
+        Parent root = view.createRoot();
+
+        wireViewActions();
+        refreshActionButtonState(config);
 
         Scene scene = new Scene(root, 820, 620);
 
@@ -91,117 +68,14 @@ public class LocalHiveAgentApplication extends Application {
         }
     }
 
-    private GridPane createConfigSection(AgentConfig config) {
-        GridPane grid = createGrid();
-
-        masterBaseUrlField = new TextField(config.masterBaseUrl());
-        masterBaseUrlField.setPromptText("http://localhost:8080");
-
-        sharedRamMbField = new TextField(String.valueOf(config.sharedRamMb()));
-        sharedRamMbField.setPromptText("8192");
-
-        sharedRamSlider = new Slider(0, Math.max(1024, detectedTotalRamMb), config.sharedRamMb());
-        sharedRamSlider.setShowTickLabels(true);
-        sharedRamSlider.setShowTickMarks(true);
-        sharedRamSlider.setMajorTickUnit(8192);
-        sharedRamSlider.setBlockIncrement(512);
-
-        sharedRamSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
-            int roundedValue = roundToStep(newValue.intValue(), 512);
-            sharedRamMbField.setText(String.valueOf(roundedValue));
-        });
-
-        sharedRamMbField.textProperty().addListener((observable, oldValue, newValue) -> {
-            if (newValue == null || newValue.isBlank()) {
-                return;
-            }
-
-            try {
-                int parsedValue = Integer.parseInt(newValue.trim());
-
-                if (parsedValue >= 0 && parsedValue <= detectedTotalRamMb) {
-                    sharedRamSlider.setValue(parsedValue);
-                }
-            } catch (NumberFormatException ignored) {
-                // Invalid input is handled when saving.
-            }
-        });
-
-        apiKeyField = new PasswordField();
-        apiKeyField.setPromptText(config.hasApiKey() ? "API key is configured" : "Paste API key after approval");
-
-        workerIdLabel = new Label(config.hasWorkerId() ? config.workerId().toString() : "not registered");
-        apiKeyLabel = new Label(config.hasApiKey() ? "configured" : "missing");
-
-        grid.addRow(0, new Label("Config:"), new Label(runtime.configService().configPath().toString()));
-        grid.addRow(1, new Label("Master URL:"), masterBaseUrlField);
-        grid.addRow(2, new Label("Worker ID:"), workerIdLabel);
-        grid.addRow(3, new Label("API Key status:"), apiKeyLabel);
-        grid.addRow(4, new Label("New API Key:"), apiKeyField);
-        grid.addRow(5, new Label("Shared RAM MB:"), sharedRamMbField);
-        grid.addRow(6, new Label("Shared RAM slider:"), sharedRamSlider);
-        pauseStatusLabel = new Label(String.valueOf(config.pauseEnabled()));
-        grid.addRow(7, new Label("Paused:"), pauseStatusLabel);
-
-        return grid;
-    }
-
-    private GridPane createMachineSpecSection(MachineSpec machineSpec) {
-        GridPane grid = createGrid();
-
-        grid.addRow(0, new Label("Hostname:"), new Label(machineSpec.hostname()));
-        grid.addRow(1, new Label("IP address:"), new Label(machineSpec.ipAddress()));
-        grid.addRow(2, new Label("OS:"), new Label(machineSpec.osType()));
-        grid.addRow(3, new Label("Total RAM:"), new Label(machineSpec.totalRamMb() + " MB"));
-        grid.addRow(4, new Label("CPU cores:"), new Label(String.valueOf(machineSpec.cpuCores())));
-        grid.addRow(5, new Label("GPU:"), new Label(machineSpec.gpuName().isBlank() ? "not detected" : machineSpec.gpuName()));
-
-        return grid;
-    }
-
-    private VBox createActionSection(AgentConfig config) {
-        Button saveConfigButton = new Button("Save Config");
-        saveConfigButton.setOnAction(event -> saveConfigFromFields());
-
-        registerButton = new Button("Register with Master");
-        registerButton.setDisable(config.hasWorkerId());
-        registerButton.setOnAction(event -> registerWithMaster());
-
-        updateAllocationButton = new Button("Update Allocation");
-        updateAllocationButton.setOnAction(event -> updateAllocation());
-
-        heartbeatNowButton = new Button("Send Heartbeat Now");
-        heartbeatNowButton.setOnAction(event -> sendHeartbeatNow(heartbeatNowButton));
-
-        startHeartbeatButton = new Button("Start Heartbeat");
-        startHeartbeatButton.setOnAction(event -> startHeartbeat());
-
-        stopHeartbeatButton = new Button("Stop Heartbeat");
-        stopHeartbeatButton.setDisable(true);
-        stopHeartbeatButton.setOnAction(event -> stopHeartbeat());
-
-        statusLabel = new Label("Ready.");
-        lastHeartbeatLabel = new Label("Last heartbeat: never");
-
-        pauseResumeButton = new Button(getPauseResumeButtonText(config.pauseEnabled()));
-        pauseResumeButton.setOnAction(event -> togglePauseMode());
-
-        VBox box = new VBox(10);
-        box.getChildren().addAll(
-                saveConfigButton,
-                updateAllocationButton,
-                pauseResumeButton,
-                registerButton,
-                heartbeatNowButton,
-                startHeartbeatButton,
-                stopHeartbeatButton,
-                statusLabel,
-                lastHeartbeatLabel
-        );
-
-        refreshActionButtonState(config);
-
-        return box;
+    private void wireViewActions() {
+        view.saveConfigButton().setOnAction(event -> saveConfigFromFields());
+        view.updateAllocationButton().setOnAction(event -> updateAllocation());
+        view.pauseResumeButton().setOnAction(event -> togglePauseMode());
+        view.registerButton().setOnAction(event -> registerWithMaster());
+        view.heartbeatNowButton().setOnAction(event -> sendHeartbeatNow());
+        view.startHeartbeatButton().setOnAction(event -> startHeartbeat());
+        view.stopHeartbeatButton().setOnAction(event -> stopHeartbeat());
     }
 
     private boolean saveConfigFromFields() {
@@ -209,24 +83,24 @@ public class LocalHiveAgentApplication extends Application {
             AgentConfig updatedConfig = saveConfigFromFieldsInternal();
 
             refreshConfigLabels(updatedConfig);
-            statusLabel.setText("Config saved.");
+            view.setStatus("Config saved.");
 
-            if (!apiKeyField.getText().isBlank()) {
-                apiKeyField.clear();
+            if (!view.apiKeyInput().isBlank()) {
+                view.clearApiKeyInput();
             }
 
             return true;
         } catch (RuntimeException exception) {
             log.warn("Failed to save config", exception);
-            statusLabel.setText("Failed to save config: " + exception.getMessage());
+            view.setStatus("Failed to save config: " + exception.getMessage());
             return false;
         }
     }
 
     private AgentConfig saveConfigFromFieldsInternal() {
-        String masterBaseUrl = masterBaseUrlField.getText();
-        String apiKey = apiKeyField.getText();
-        int sharedRamMb = parseSharedRamMb(sharedRamMbField.getText());
+        String masterBaseUrl = view.masterBaseUrlInput();
+        String apiKey = view.apiKeyInput();
+        int sharedRamMb = parseSharedRamMb(view.sharedRamMbInput());
 
         return runtime.configService().update(config -> {
             AgentConfig updatedConfig = config
@@ -246,8 +120,8 @@ public class LocalHiveAgentApplication extends Application {
             return;
         }
 
-        registerButton.setDisable(true);
-        statusLabel.setText("Registering with Master...");
+        view.registerButton().setDisable(true);
+        view.setStatus("Registering with Master...");
 
         Task<AgentRegistrationResult> task = new Task<>() {
             @Override
@@ -261,8 +135,8 @@ public class LocalHiveAgentApplication extends Application {
 
             refreshConfigLabels(result.updatedConfig());
 
-            statusLabel.setText("Registration completed: " + result.response().message());
-            registerButton.setDisable(true);
+            view.setStatus("Registration completed: " + result.response().message());
+            view.registerButton().setDisable(true);
 
             log.info("Worker registered successfully. Worker ID: {}", result.updatedConfig().workerId());
         });
@@ -270,8 +144,8 @@ public class LocalHiveAgentApplication extends Application {
         task.setOnFailed(event -> {
             Throwable exception = task.getException();
 
-            statusLabel.setText("Registration failed: " + exception.getMessage());
-            registerButton.setDisable(false);
+            view.setStatus("Registration failed: " + exception.getMessage());
+            view.registerButton().setDisable(false);
 
             log.warn("Worker registration failed", exception);
         });
@@ -279,13 +153,13 @@ public class LocalHiveAgentApplication extends Application {
         runtime.backgroundExecutor().submit(task);
     }
 
-    private void sendHeartbeatNow(Button heartbeatNowButton) {
+    private void sendHeartbeatNow() {
         if (!saveConfigFromFields()) {
             return;
         }
 
-        heartbeatNowButton.setDisable(true);
-        statusLabel.setText("Sending heartbeat...");
+        view.heartbeatNowButton().setDisable(true);
+        view.setStatus("Sending heartbeat...");
 
         Task<HeartbeatTickResult> task = new Task<>() {
             @Override
@@ -317,14 +191,16 @@ public class LocalHiveAgentApplication extends Application {
             HeartbeatTickResult result = task.getValue();
 
             handleHeartbeatResult(result);
-            heartbeatNowButton.setDisable(false);
+            view.heartbeatNowButton().setDisable(false);
+            refreshActionButtonState(runtime.configService().load());
         });
 
         task.setOnFailed(event -> {
             Throwable exception = task.getException();
 
-            statusLabel.setText("Heartbeat failed: " + exception.getMessage());
-            heartbeatNowButton.setDisable(false);
+            view.setStatus("Heartbeat failed: " + exception.getMessage());
+            view.heartbeatNowButton().setDisable(false);
+            refreshActionButtonState(runtime.configService().load());
 
             log.warn("Heartbeat failed", exception);
         });
@@ -345,52 +221,42 @@ public class LocalHiveAgentApplication extends Application {
                     Platform.runLater(() -> handleHeartbeatResult(result))
             );
 
-            startHeartbeatButton.setDisable(true);
-            stopHeartbeatButton.setDisable(false);
-            statusLabel.setText("Heartbeat scheduler started.");
+            view.startHeartbeatButton().setDisable(true);
+            view.stopHeartbeatButton().setDisable(false);
+            view.setStatus("Heartbeat scheduler started.");
         } catch (RuntimeException exception) {
             runtime.heartbeatScheduler().stop();
             refreshActionButtonState(runtime.configService().load());
 
             log.warn("Failed to start heartbeat scheduler", exception);
-            statusLabel.setText("Failed to start heartbeat scheduler: " + exception.getMessage());
+            view.setStatus("Failed to start heartbeat scheduler: " + exception.getMessage());
         }
     }
 
     private void stopHeartbeat() {
         runtime.heartbeatScheduler().stop();
 
-        startHeartbeatButton.setDisable(false);
-        stopHeartbeatButton.setDisable(true);
-        statusLabel.setText("Heartbeat scheduler stopped.");
+        view.startHeartbeatButton().setDisable(false);
+        view.stopHeartbeatButton().setDisable(true);
+        view.setStatus("Heartbeat scheduler stopped.");
     }
 
     private void handleHeartbeatResult(HeartbeatTickResult result) {
         if (result.success()) {
-            statusLabel.setText(result.message());
-            lastHeartbeatLabel.setText("Last heartbeat: " + result.timestamp());
+            view.setStatus(result.message());
+            view.setLastHeartbeat("Last heartbeat: " + result.timestamp());
             log.info(result.message());
             return;
         }
 
-        statusLabel.setText(result.message());
-        lastHeartbeatLabel.setText("Last heartbeat failed: " + result.timestamp());
+        view.setStatus(result.message());
+        view.setLastHeartbeat("Last heartbeat failed: " + result.timestamp());
         log.warn(result.message(), result.error());
     }
 
     private void refreshConfigLabels(AgentConfig config) {
         Platform.runLater(() -> {
-            workerIdLabel.setText(config.hasWorkerId() ? config.workerId().toString() : "not registered");
-            apiKeyLabel.setText(config.hasApiKey() ? "configured" : "missing");
-
-            if (pauseStatusLabel != null) {
-                pauseStatusLabel.setText(String.valueOf(config.pauseEnabled()));
-            }
-
-            if (pauseResumeButton != null) {
-                pauseResumeButton.setText(getPauseResumeButtonText(config.pauseEnabled()));
-            }
-
+            view.refreshConfig(config);
             refreshActionButtonState(config);
         });
     }
@@ -401,29 +267,11 @@ public class LocalHiveAgentApplication extends Application {
                 && config.hasWorkerId()
                 && config.hasApiKey();
 
-        if (registerButton != null) {
-            registerButton.setDisable(!canRegister);
-        }
-
-        if (updateAllocationButton != null) {
-            updateAllocationButton.setDisable(!canUseWorkerApi);
-        }
-
-        if (pauseResumeButton != null) {
-            pauseResumeButton.setDisable(!canUseWorkerApi);
-        }
-
-        if (heartbeatNowButton != null) {
-            heartbeatNowButton.setDisable(!canUseWorkerApi);
-        }
-
-        if (startHeartbeatButton != null) {
-            startHeartbeatButton.setDisable(!canUseWorkerApi || runtime.heartbeatScheduler().isRunning());
-        }
-
-        if (stopHeartbeatButton != null) {
-            stopHeartbeatButton.setDisable(!runtime.heartbeatScheduler().isRunning());
-        }
+        view.refreshActionButtonState(
+                canRegister,
+                canUseWorkerApi,
+                runtime.heartbeatScheduler().isRunning()
+        );
     }
 
     private static void validateConfigBeforeHeartbeat(AgentConfig config) {
@@ -440,13 +288,6 @@ public class LocalHiveAgentApplication extends Application {
         }
     }
 
-    private static GridPane createGrid() {
-        GridPane grid = new GridPane();
-        grid.setHgap(12);
-        grid.setVgap(8);
-        return grid;
-    }
-
     private int parseSharedRamMb(String value) {
         if (value == null || value.isBlank()) {
             return 0;
@@ -459,7 +300,7 @@ public class LocalHiveAgentApplication extends Application {
                 throw new IllegalArgumentException("Shared RAM cannot be negative.");
             }
 
-            if (sharedRamMb > detectedTotalRamMb) {
+            if (sharedRamMb > view.detectedTotalRamMb()) {
                 throw new IllegalArgumentException("Shared RAM cannot be greater than total RAM.");
             }
 
@@ -479,12 +320,12 @@ public class LocalHiveAgentApplication extends Application {
         try {
             validateConfigBeforeHeartbeat(config);
         } catch (RuntimeException exception) {
-            statusLabel.setText("Cannot update allocation: " + exception.getMessage());
+            view.setStatus("Cannot update allocation: " + exception.getMessage());
             return;
         }
 
-        updateAllocationButton.setDisable(true);
-        statusLabel.setText("Updating allocation...");
+        view.updateAllocationButton().setDisable(true);
+        view.setStatus("Updating allocation...");
 
         Task<Void> task = new Task<>() {
             @Override
@@ -503,15 +344,15 @@ public class LocalHiveAgentApplication extends Application {
         };
 
         task.setOnSucceeded(event -> {
-            statusLabel.setText("Allocation updated: " + runtime.configService().load().sharedRamMb() + " MB");
-            updateAllocationButton.setDisable(false);
+            view.setStatus("Allocation updated: " + runtime.configService().load().sharedRamMb() + " MB");
+            view.updateAllocationButton().setDisable(false);
         });
 
         task.setOnFailed(event -> {
             Throwable exception = task.getException();
 
-            statusLabel.setText("Allocation update failed: " + exception.getMessage());
-            updateAllocationButton.setDisable(false);
+            view.setStatus("Allocation update failed: " + exception.getMessage());
+            view.updateAllocationButton().setDisable(false);
 
             log.warn("Allocation update failed", exception);
         });
@@ -529,7 +370,7 @@ public class LocalHiveAgentApplication extends Application {
         try {
             validateConfigBeforeHeartbeat(currentConfig);
         } catch (RuntimeException exception) {
-            statusLabel.setText("Cannot change Gamer Mode: " + exception.getMessage());
+            view.setStatus("Cannot change Gamer Mode: " + exception.getMessage());
             return;
         }
 
@@ -539,8 +380,8 @@ public class LocalHiveAgentApplication extends Application {
         AgentConfig updatedConfig = runtime.configService().update(config -> config.withPauseEnabled(newPauseState));
         refreshConfigLabels(updatedConfig);
 
-        pauseResumeButton.setDisable(true);
-        statusLabel.setText(newPauseState ? "Enabling Gamer Mode..." : "Disabling Gamer Mode...");
+        view.pauseResumeButton().setDisable(true);
+        view.setStatus(newPauseState ? "Enabling Gamer Mode..." : "Disabling Gamer Mode...");
 
         Task<HeartbeatTickResult> task = new Task<>() {
             @Override
@@ -573,18 +414,18 @@ public class LocalHiveAgentApplication extends Application {
 
             if (result.success()) {
                 handleHeartbeatResult(result);
-                statusLabel.setText(newPauseState
+                view.setStatus(newPauseState
                         ? "Gamer Mode enabled. Worker is paused."
                         : "Gamer Mode disabled. Worker is active.");
             } else {
                 AgentConfig rolledBackConfig = runtime.configService().update(config -> config.withPauseEnabled(previousPauseState));
                 refreshConfigLabels(rolledBackConfig);
 
-                statusLabel.setText("Gamer Mode change failed: " + result.error().getMessage());
+                view.setStatus("Gamer Mode change failed: " + result.error().getMessage());
                 log.warn("Gamer Mode change failed", result.error());
             }
 
-            pauseResumeButton.setDisable(false);
+            view.pauseResumeButton().setDisable(false);
             refreshActionButtonState(runtime.configService().load());
         });
 
@@ -594,23 +435,13 @@ public class LocalHiveAgentApplication extends Application {
             AgentConfig rolledBackConfig = runtime.configService().update(config -> config.withPauseEnabled(previousPauseState));
             refreshConfigLabels(rolledBackConfig);
 
-            statusLabel.setText("Gamer Mode change failed: " + exception.getMessage());
-            pauseResumeButton.setDisable(false);
+            view.setStatus("Gamer Mode change failed: " + exception.getMessage());
+            view.pauseResumeButton().setDisable(false);
             refreshActionButtonState(rolledBackConfig);
 
             log.warn("Gamer Mode change failed", exception);
         });
 
         runtime.backgroundExecutor().submit(task);
-    }
-
-    private static String getPauseResumeButtonText(boolean pauseEnabled) {
-        return pauseEnabled ? "Resume" : "Pause";
-    }
-
-    private static int roundToStep(int value, int step) {
-        if (step <= 0)
-            return value;
-        return Math.round((float) value / step) * step;
     }
 }
