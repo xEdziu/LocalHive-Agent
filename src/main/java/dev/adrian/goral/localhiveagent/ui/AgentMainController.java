@@ -2,6 +2,7 @@ package dev.adrian.goral.localhiveagent.ui;
 
 import dev.adrian.goral.localhiveagent.app.AgentRuntime;
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
+import dev.adrian.goral.localhiveagent.desktop.AgentTrayState;
 import dev.adrian.goral.localhiveagent.heartbeat.HeartbeatTickResult;
 import dev.adrian.goral.localhiveagent.master.AgentRegistrationResult;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
@@ -19,6 +20,8 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 public class AgentMainController {
 
@@ -27,9 +30,13 @@ public class AgentMainController {
     private static final DateTimeFormatter HEARTBEAT_TIME_FORMATTER = DateTimeFormatter
             .ofPattern("yyyy-MM-dd HH:mm:ss")
             .withZone(ZoneId.systemDefault());
+    private static final Consumer<AgentTrayState> NOOP_TRAY_STATE_CONSUMER = state -> {
+    };
 
     private final AgentRuntime runtime;
     private final AgentMainView view;
+    private final AtomicBoolean workerModeChangeInProgress = new AtomicBoolean(false);
+    private Consumer<AgentTrayState> trayStateConsumer = NOOP_TRAY_STATE_CONSUMER;
 
     public AgentMainController(AgentRuntime runtime, AgentMainView view) {
         this.runtime = Objects.requireNonNull(runtime);
@@ -44,10 +51,25 @@ public class AgentMainController {
         autoStartHeartbeatIfReady(config);
     }
 
+    public void setTrayStateConsumer(Consumer<AgentTrayState> trayStateConsumer) {
+        this.trayStateConsumer = trayStateConsumer == null
+                ? NOOP_TRAY_STATE_CONSUMER
+                : trayStateConsumer;
+        publishTrayState(runtime.configService().load());
+    }
+
+    public AgentTrayState currentTrayState() {
+        return createTrayState(runtime.configService().load());
+    }
+
+    public void toggleWorkerMode() {
+        togglePauseMode();
+    }
+
     private void wireViewActions() {
         view.saveConfigButton().setOnAction(event -> saveConfigFromFields());
         view.updateAllocationButton().setOnAction(event -> updateAllocation());
-        view.pauseResumeButton().setOnAction(event -> togglePauseMode());
+        view.pauseResumeButton().setOnAction(event -> toggleWorkerMode());
         view.registerButton().setOnAction(event -> registerWithMaster());
         view.heartbeatNowButton().setOnAction(event -> sendHeartbeatNow());
         view.startHeartbeatButton().setOnAction(event -> startHeartbeat());
@@ -258,7 +280,13 @@ public class AgentMainController {
     }
 
     private void togglePauseMode() {
+        if (!workerModeChangeInProgress.compareAndSet(false, true)) {
+            view.setStatus("Gamer Mode change is already in progress.");
+            return;
+        }
+
         if (!saveConfigFromFields()) {
+            workerModeChangeInProgress.set(false);
             return;
         }
 
@@ -268,6 +296,7 @@ public class AgentMainController {
             AgentConfigValidator.validateWorkerApiReady(currentConfig, hasStoredApiKey());
         } catch (RuntimeException exception) {
             view.setStatus("Cannot change Gamer Mode: " + exception.getMessage());
+            workerModeChangeInProgress.set(false);
             return;
         }
 
@@ -306,6 +335,7 @@ public class AgentMainController {
             }
 
             view.pauseResumeButton().setDisable(false);
+            workerModeChangeInProgress.set(false);
             refreshActionButtonState(runtime.configService().load());
         });
 
@@ -319,6 +349,7 @@ public class AgentMainController {
 
             view.setStatus("Gamer Mode change failed: " + exception.getMessage());
             view.pauseResumeButton().setDisable(false);
+            workerModeChangeInProgress.set(false);
             refreshActionButtonState(rolledBackConfig);
 
             log.warn("Gamer Mode change failed", exception);
@@ -377,9 +408,42 @@ public class AgentMainController {
                 && config.hasWorkerId()
                 && hasStoredApiKey();
 
+        boolean heartbeatRunning = runtime.heartbeatScheduler().isRunning();
+
         view.refreshActionButtonState(
                 canRegister,
                 canUseWorkerApi,
+                heartbeatRunning
+        );
+        publishTrayState(config, canUseWorkerApi, heartbeatRunning);
+    }
+
+    private void publishTrayState(AgentConfig config) {
+        publishTrayState(
+                config,
+                config.hasMasterBaseUrl() && config.hasWorkerId() && hasStoredApiKey(),
+                runtime.heartbeatScheduler().isRunning()
+        );
+    }
+
+    private void publishTrayState(AgentConfig config, boolean canUseWorkerApi, boolean heartbeatRunning) {
+        try {
+            trayStateConsumer.accept(new AgentTrayState(
+                    config.hasWorkerId(),
+                    canUseWorkerApi,
+                    config.pauseEnabled(),
+                    heartbeatRunning
+            ));
+        } catch (RuntimeException exception) {
+            log.warn("Tray state update failed", exception);
+        }
+    }
+
+    private AgentTrayState createTrayState(AgentConfig config) {
+        return new AgentTrayState(
+                config.hasWorkerId(),
+                config.hasMasterBaseUrl() && config.hasWorkerId() && hasStoredApiKey(),
+                config.pauseEnabled(),
                 runtime.heartbeatScheduler().isRunning()
         );
     }

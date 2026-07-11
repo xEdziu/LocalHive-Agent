@@ -1,10 +1,13 @@
 package dev.adrian.goral.localhiveagent.app;
 
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
+import dev.adrian.goral.localhiveagent.desktop.AgentTrayActions;
+import dev.adrian.goral.localhiveagent.desktop.AgentTrayService;
 import dev.adrian.goral.localhiveagent.system.MachineSpec;
 import dev.adrian.goral.localhiveagent.ui.AgentMainController;
 import dev.adrian.goral.localhiveagent.ui.AgentMainView;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
@@ -12,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class LocalHiveAgentApplication extends Application {
 
@@ -22,6 +26,8 @@ public class LocalHiveAgentApplication extends Application {
     private static final double MIN_WINDOW_HEIGHT = 700;
 
     private AgentRuntime runtime;
+    private AgentTrayService trayService;
+    private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
 
     @Override
     public void init() {
@@ -69,13 +75,89 @@ public class LocalHiveAgentApplication extends Application {
         stage.setMinWidth(MIN_WINDOW_WIDTH);
         stage.setMinHeight(MIN_WINDOW_HEIGHT);
         stage.setScene(scene);
+
+        configureSystemTray(stage, controller);
+
         stage.show();
     }
 
     @Override
     public void stop() {
+        AgentTrayService currentTrayService = trayService;
+
+        if (currentTrayService != null) {
+            currentTrayService.close();
+        }
+
         if (runtime != null) {
             runtime.close();
         }
+    }
+
+    private void configureSystemTray(Stage stage, AgentMainController controller) {
+        AgentTrayService candidateTrayService = new AgentTrayService();
+
+        if (!candidateTrayService.start(createTrayActions(stage, controller), controller.currentTrayState())) {
+            return;
+        }
+
+        trayService = candidateTrayService;
+        controller.setTrayStateConsumer(candidateTrayService::updateState);
+        Platform.setImplicitExit(false);
+
+        stage.setOnCloseRequest(event -> {
+            if (shutdownRequested.get()) {
+                return;
+            }
+
+            event.consume();
+            stage.hide();
+            candidateTrayService.showDashboardHiddenNotificationOnce();
+        });
+    }
+
+    private AgentTrayActions createTrayActions(Stage stage, AgentMainController controller) {
+        return new AgentTrayActions() {
+            @Override
+            public void openDashboard() {
+                Platform.runLater(() -> {
+                    stage.show();
+                    stage.setIconified(false);
+                    stage.toFront();
+                    stage.requestFocus();
+                });
+            }
+
+            @Override
+            public void toggleWorkerMode() {
+                Platform.runLater(controller::toggleWorkerMode);
+            }
+
+            @Override
+            public void exitApplication() {
+                requestApplicationExit();
+            }
+        };
+    }
+
+    private void requestApplicationExit() {
+        if (!shutdownRequested.compareAndSet(false, true)) {
+            return;
+        }
+
+        log.info("LocalHive Agent exit requested.");
+
+        AgentTrayService currentTrayService = trayService;
+
+        if (currentTrayService != null) {
+            currentTrayService.close();
+        }
+
+        if (runtime != null) {
+            runtime.close();
+        }
+
+        Platform.setImplicitExit(true);
+        Platform.runLater(Platform::exit);
     }
 }

@@ -12,6 +12,7 @@ import dev.adrian.goral.localhiveagent.security.CredentialStoreFactory;
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class AgentRuntime implements AutoCloseable {
 
@@ -22,6 +23,7 @@ public final class AgentRuntime implements AutoCloseable {
     private final HeartbeatScheduler heartbeatScheduler;
     private final ExecutorService backgroundExecutor;
     private final CredentialStore credentialStore;
+    private final AtomicBoolean closed;
 
     private AgentRuntime(
             ConfigService configService,
@@ -39,6 +41,7 @@ public final class AgentRuntime implements AutoCloseable {
         this.heartbeatScheduler = heartbeatScheduler;
         this.backgroundExecutor = backgroundExecutor;
         this.credentialStore = credentialStore;
+        this.closed = new AtomicBoolean(false);
     }
 
     public static AgentRuntime createDefault() {
@@ -110,6 +113,10 @@ public final class AgentRuntime implements AutoCloseable {
 
     @Override
     public void close() {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+
         heartbeatScheduler.close();
         backgroundExecutor.shutdownNow();
     }
