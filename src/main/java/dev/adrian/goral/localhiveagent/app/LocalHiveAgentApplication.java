@@ -97,12 +97,12 @@ public class LocalHiveAgentApplication extends Application {
     private void configureSystemTray(Stage stage, AgentMainController controller) {
         AgentTrayService candidateTrayService = new AgentTrayService();
 
-        if (!candidateTrayService.start(createTrayActions(stage, controller), controller.currentTrayState())) {
+        if (!candidateTrayService.start(createTrayActions(stage, controller), runtime.agentStateStore().snapshot())) {
             return;
         }
 
         trayService = candidateTrayService;
-        controller.setTrayStateConsumer(candidateTrayService::updateState);
+        runtime.agentStateStore().addListener(candidateTrayService::updateState);
         Platform.setImplicitExit(false);
 
         stage.setOnCloseRequest(event -> {

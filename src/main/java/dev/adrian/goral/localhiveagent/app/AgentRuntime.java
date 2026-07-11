@@ -4,6 +4,7 @@ import dev.adrian.goral.localhiveagent.config.ConfigService;
 import dev.adrian.goral.localhiveagent.heartbeat.HeartbeatScheduler;
 import dev.adrian.goral.localhiveagent.master.AgentRegistrationService;
 import dev.adrian.goral.localhiveagent.master.RegistrationClient;
+import dev.adrian.goral.localhiveagent.state.AgentStateStore;
 import dev.adrian.goral.localhiveagent.system.OshiSystemInfoProvider;
 import dev.adrian.goral.localhiveagent.system.SystemInfoProvider;
 import dev.adrian.goral.localhiveagent.security.CredentialStore;
@@ -23,6 +24,7 @@ public final class AgentRuntime implements AutoCloseable {
     private final HeartbeatScheduler heartbeatScheduler;
     private final ExecutorService backgroundExecutor;
     private final CredentialStore credentialStore;
+    private final AgentStateStore agentStateStore;
     private final AtomicBoolean closed;
 
     private AgentRuntime(
@@ -32,7 +34,8 @@ public final class AgentRuntime implements AutoCloseable {
             AgentRegistrationService agentRegistrationService,
             HeartbeatScheduler heartbeatScheduler,
             ExecutorService backgroundExecutor,
-            CredentialStore credentialStore
+            CredentialStore credentialStore,
+            AgentStateStore agentStateStore
     ) {
         this.configService = configService;
         this.systemInfoProvider = systemInfoProvider;
@@ -41,6 +44,7 @@ public final class AgentRuntime implements AutoCloseable {
         this.heartbeatScheduler = heartbeatScheduler;
         this.backgroundExecutor = backgroundExecutor;
         this.credentialStore = credentialStore;
+        this.agentStateStore = agentStateStore;
         this.closed = new AtomicBoolean(false);
     }
 
@@ -52,6 +56,12 @@ public final class AgentRuntime implements AutoCloseable {
         SystemInfoProvider systemInfoProvider = new OshiSystemInfoProvider();
         RegistrationClient registrationClient = new RegistrationClient();
         CredentialStore credentialStore = CredentialStoreFactory.createDefault(configDirectory);
+        var initialConfig = configService.load();
+        AgentStateStore agentStateStore = AgentStateStore.fromConfig(
+                initialConfig,
+                initialConfig.hasMasterBaseUrl() && initialConfig.hasWorkerId() && credentialStore.hasApiKey(),
+                false
+        );
 
         AgentRegistrationService agentRegistrationService = new AgentRegistrationService(
                 configService,
@@ -62,7 +72,8 @@ public final class AgentRuntime implements AutoCloseable {
         HeartbeatScheduler heartbeatScheduler = new HeartbeatScheduler(
                 configService,
                 credentialStore,
-                registrationClient
+                registrationClient,
+                agentStateStore
         );
 
         ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor(runnable -> {
@@ -79,7 +90,8 @@ public final class AgentRuntime implements AutoCloseable {
                 agentRegistrationService,
                 heartbeatScheduler,
                 backgroundExecutor,
-                credentialStore
+                credentialStore,
+                agentStateStore
         );
     }
 
@@ -111,6 +123,10 @@ public final class AgentRuntime implements AutoCloseable {
         return credentialStore;
     }
 
+    public AgentStateStore agentStateStore() {
+        return agentStateStore;
+    }
+
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {
@@ -119,5 +135,6 @@ public final class AgentRuntime implements AutoCloseable {
 
         heartbeatScheduler.close();
         backgroundExecutor.shutdownNow();
+        agentStateStore.close();
     }
 }

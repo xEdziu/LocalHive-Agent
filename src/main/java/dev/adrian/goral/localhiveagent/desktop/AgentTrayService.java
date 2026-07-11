@@ -1,5 +1,8 @@
 package dev.adrian.goral.localhiveagent.desktop;
 
+import dev.adrian.goral.localhiveagent.state.AgentStateSnapshot;
+import dev.adrian.goral.localhiveagent.state.HeartbeatState;
+import dev.adrian.goral.localhiveagent.state.WorkerMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,7 +41,7 @@ public final class AgentTrayService implements AutoCloseable {
     private MenuItem heartbeatItem;
     private MenuItem toggleWorkerModeItem;
 
-    public boolean start(AgentTrayActions actions, AgentTrayState initialState) {
+    public boolean start(AgentTrayActions actions, AgentStateSnapshot initialState) {
         Objects.requireNonNull(actions);
         Objects.requireNonNull(initialState);
 
@@ -89,7 +92,7 @@ public final class AgentTrayService implements AutoCloseable {
         }
     }
 
-    public void updateState(AgentTrayState state) {
+    public void updateState(AgentStateSnapshot state) {
         Objects.requireNonNull(state);
 
         if (!initialized.get()) {
@@ -180,15 +183,36 @@ public final class AgentTrayService implements AutoCloseable {
         return menu;
     }
 
-    private void applyState(AgentTrayState state) {
+    private void applyState(AgentStateSnapshot state) {
         if (!initialized.get() || modeItem == null || heartbeatItem == null || toggleWorkerModeItem == null) {
             return;
         }
 
-        modeItem.setLabel(state.modeLabel());
-        heartbeatItem.setLabel(state.heartbeatLabel());
-        toggleWorkerModeItem.setLabel(state.workerModeActionLabel());
+        modeItem.setLabel(formatModeLabel(state));
+        heartbeatItem.setLabel(formatHeartbeatLabel(state.heartbeatState()));
+        toggleWorkerModeItem.setLabel(formatWorkerModeActionLabel(state.workerMode()));
         toggleWorkerModeItem.setEnabled(state.workerApiReady());
+    }
+
+    private static String formatModeLabel(AgentStateSnapshot state) {
+        if (!state.workerRegistered()) {
+            return "Mode: Unregistered";
+        }
+
+        return state.workerMode() == WorkerMode.PAUSED ? "Mode: Paused" : "Mode: Active";
+    }
+
+    private static String formatHeartbeatLabel(HeartbeatState state) {
+        return switch (state) {
+            case STOPPED -> "Heartbeat: Stopped";
+            case STARTING -> "Heartbeat: Starting";
+            case RUNNING -> "Heartbeat: Running";
+            case FAILED -> "Heartbeat: Failed";
+        };
+    }
+
+    private static String formatWorkerModeActionLabel(WorkerMode mode) {
+        return mode == WorkerMode.PAUSED ? "Resume Worker" : "Pause Worker";
     }
 
     private Image loadTrayImage() {

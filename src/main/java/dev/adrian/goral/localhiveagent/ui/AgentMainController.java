@@ -2,12 +2,15 @@ package dev.adrian.goral.localhiveagent.ui;
 
 import dev.adrian.goral.localhiveagent.app.AgentRuntime;
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
-import dev.adrian.goral.localhiveagent.desktop.AgentTrayState;
 import dev.adrian.goral.localhiveagent.heartbeat.HeartbeatTickResult;
 import dev.adrian.goral.localhiveagent.master.AgentRegistrationResult;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
 import dev.adrian.goral.localhiveagent.master.dto.WorkerHardwareUpdateRequest;
+import dev.adrian.goral.localhiveagent.state.AgentStateListener;
+import dev.adrian.goral.localhiveagent.state.AgentStateSnapshot;
+import dev.adrian.goral.localhiveagent.state.AgentStateStore;
+import dev.adrian.goral.localhiveagent.state.HeartbeatState;
 import dev.adrian.goral.localhiveagent.system.MachineSpec;
 import dev.adrian.goral.localhiveagent.validation.AgentConfigValidator;
 import javafx.application.Platform;
@@ -16,50 +19,37 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 
 public class AgentMainController {
 
     private static final Logger log = LoggerFactory.getLogger(AgentMainController.class);
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
-    private static final DateTimeFormatter HEARTBEAT_TIME_FORMATTER = DateTimeFormatter
-            .ofPattern("yyyy-MM-dd HH:mm:ss")
-            .withZone(ZoneId.systemDefault());
-    private static final Consumer<AgentTrayState> NOOP_TRAY_STATE_CONSUMER = state -> {
-    };
 
     private final AgentRuntime runtime;
     private final AgentMainView view;
+    private final AgentStateStore agentStateStore;
+    private final AgentStateListener viewStateListener;
     private final AtomicBoolean workerModeChangeInProgress = new AtomicBoolean(false);
-    private Consumer<AgentTrayState> trayStateConsumer = NOOP_TRAY_STATE_CONSUMER;
 
     public AgentMainController(AgentRuntime runtime, AgentMainView view) {
         this.runtime = Objects.requireNonNull(runtime);
         this.view = Objects.requireNonNull(view);
+        this.agentStateStore = runtime.agentStateStore();
+        this.viewStateListener = this::applyStateToView;
     }
 
     public void initialize() {
         wireViewActions();
+        agentStateStore.addListener(viewStateListener);
+        applyStateToView(agentStateStore.snapshot());
 
         AgentConfig config = runtime.configService().loadOrCreate();
+        syncConfigurationState(config);
+        view.refreshConfig(config, hasStoredApiKey());
         refreshActionButtonState(config);
         autoStartHeartbeatIfReady(config);
-    }
-
-    public void setTrayStateConsumer(Consumer<AgentTrayState> trayStateConsumer) {
-        this.trayStateConsumer = trayStateConsumer == null
-                ? NOOP_TRAY_STATE_CONSUMER
-                : trayStateConsumer;
-        publishTrayState(runtime.configService().load());
-    }
-
-    public AgentTrayState currentTrayState() {
-        return createTrayState(runtime.configService().load());
     }
 
     public void toggleWorkerMode() {
@@ -89,13 +79,13 @@ public class AgentMainController {
                 view.clearApiKeyInput();
             }
 
-            view.setStatus("Config saved.");
+            agentStateStore.setLastMessage("Config saved.");
             autoStartHeartbeatIfReady(updatedConfig);
 
             return true;
         } catch (RuntimeException exception) {
             log.warn("Failed to save config", exception);
-            view.setStatus("Failed to save config: " + exception.getMessage());
+            agentStateStore.setLastError("Failed to save config: " + exception.getMessage());
             return false;
         }
     }
@@ -125,7 +115,7 @@ public class AgentMainController {
         }
 
         view.registerButton().setDisable(true);
-        view.setStatus("Registering with Master...");
+        agentStateStore.setLastMessage("Registering with Master...");
 
         Task<AgentRegistrationResult> task = new Task<>() {
             @Override
@@ -139,8 +129,7 @@ public class AgentMainController {
 
             refreshConfigLabels(result.updatedConfig());
 
-            view.setStatus("Registration completed: " + result.response().message());
-            view.setMasterConnectionConnected();
+            agentStateStore.markMasterConnected("Registration completed: " + result.response().message());
             view.registerButton().setDisable(true);
 
             log.info("Worker registered successfully. Worker ID: {}", result.updatedConfig().workerId());
@@ -149,7 +138,7 @@ public class AgentMainController {
         task.setOnFailed(event -> {
             Throwable exception = task.getException();
 
-            view.setStatus("Registration failed: " + exception.getMessage());
+            agentStateStore.setLastError("Registration failed: " + exception.getMessage());
             view.registerButton().setDisable(false);
             refreshActionButtonState(runtime.configService().load());
 
@@ -165,7 +154,7 @@ public class AgentMainController {
         }
 
         view.heartbeatNowButton().setDisable(true);
-        view.setStatus("Sending heartbeat...");
+        agentStateStore.setLastMessage("Sending heartbeat...");
 
         Task<HeartbeatTickResult> task = new Task<>() {
             @Override
@@ -185,7 +174,7 @@ public class AgentMainController {
         task.setOnFailed(event -> {
             Throwable exception = task.getException();
 
-            view.setStatus("Heartbeat failed: " + exception.getMessage());
+            agentStateStore.setLastError("Heartbeat failed: " + exception.getMessage());
             view.heartbeatNowButton().setDisable(false);
             refreshActionButtonState(runtime.configService().load());
 
@@ -204,18 +193,21 @@ public class AgentMainController {
             AgentConfig config = runtime.configService().load();
             AgentConfigValidator.validateWorkerApiReady(config, hasStoredApiKey());
 
+            agentStateStore.setHeartbeatState(HeartbeatState.STARTING);
             runtime.heartbeatScheduler().start(HEARTBEAT_INTERVAL, result ->
-                    Platform.runLater(() -> handleHeartbeatResult(result))
+                    logHeartbeatResult(result)
             );
 
             refreshActionButtonState(config);
-            view.setStatus("Heartbeat scheduler started.");
+            agentStateStore.setHeartbeatState(HeartbeatState.RUNNING);
+            agentStateStore.setLastMessage("Heartbeat scheduler started.");
         } catch (RuntimeException exception) {
             runtime.heartbeatScheduler().stop();
             refreshActionButtonState(runtime.configService().load());
 
             log.warn("Failed to start heartbeat scheduler", exception);
-            view.setStatus("Failed to start heartbeat scheduler: " + exception.getMessage());
+            agentStateStore.setHeartbeatState(HeartbeatState.STOPPED);
+            agentStateStore.setLastError("Failed to start heartbeat scheduler: " + exception.getMessage());
         }
     }
 
@@ -223,7 +215,8 @@ public class AgentMainController {
         runtime.heartbeatScheduler().stop();
 
         refreshActionButtonState(runtime.configService().load());
-        view.setStatus("Heartbeat scheduler stopped.");
+        agentStateStore.setHeartbeatState(HeartbeatState.STOPPED);
+        agentStateStore.setLastMessage("Heartbeat scheduler stopped.");
     }
 
     private void updateAllocation() {
@@ -236,12 +229,12 @@ public class AgentMainController {
         try {
             AgentConfigValidator.validateWorkerApiReady(config, hasStoredApiKey());
         } catch (RuntimeException exception) {
-            view.setStatus("Cannot update allocation: " + exception.getMessage());
+            agentStateStore.setLastError("Cannot update allocation: " + exception.getMessage());
             return;
         }
 
         view.updateAllocationButton().setDisable(true);
-        view.setStatus("Updating allocation...");
+        agentStateStore.setLastMessage("Updating allocation...");
 
         Task<Void> task = new Task<>() {
             @Override
@@ -260,8 +253,8 @@ public class AgentMainController {
         };
 
         task.setOnSucceeded(event -> {
-            view.setStatus("Allocation updated: " + runtime.configService().load().sharedRamMb() + " MB");
-            view.setMasterConnectionConnected();
+            agentStateStore.markMasterConnected("Allocation updated: "
+                    + runtime.configService().load().sharedRamMb() + " MB");
             view.updateAllocationButton().setDisable(false);
             refreshActionButtonState(runtime.configService().load());
         });
@@ -269,7 +262,7 @@ public class AgentMainController {
         task.setOnFailed(event -> {
             Throwable exception = task.getException();
 
-            view.setStatus("Allocation update failed: " + exception.getMessage());
+            agentStateStore.setLastError("Allocation update failed: " + exception.getMessage());
             view.updateAllocationButton().setDisable(false);
             refreshActionButtonState(runtime.configService().load());
 
@@ -281,7 +274,7 @@ public class AgentMainController {
 
     private void togglePauseMode() {
         if (!workerModeChangeInProgress.compareAndSet(false, true)) {
-            view.setStatus("Gamer Mode change is already in progress.");
+            agentStateStore.setLastMessage("Gamer Mode change is already in progress.");
             return;
         }
 
@@ -295,7 +288,7 @@ public class AgentMainController {
         try {
             AgentConfigValidator.validateWorkerApiReady(currentConfig, hasStoredApiKey());
         } catch (RuntimeException exception) {
-            view.setStatus("Cannot change Gamer Mode: " + exception.getMessage());
+            agentStateStore.setLastError("Cannot change Gamer Mode: " + exception.getMessage());
             workerModeChangeInProgress.set(false);
             return;
         }
@@ -307,7 +300,7 @@ public class AgentMainController {
         refreshConfigLabels(updatedConfig);
 
         view.pauseResumeButton().setDisable(true);
-        view.setStatus(newPauseState ? "Enabling Gamer Mode..." : "Disabling Gamer Mode...");
+        agentStateStore.setLastMessage(newPauseState ? "Enabling Gamer Mode..." : "Disabling Gamer Mode...");
 
         Task<HeartbeatTickResult> task = new Task<>() {
             @Override
@@ -321,7 +314,7 @@ public class AgentMainController {
 
             if (result.success()) {
                 handleHeartbeatResult(result);
-                view.setStatus(newPauseState
+                agentStateStore.setLastMessage(newPauseState
                         ? "Gamer Mode enabled. Worker is paused."
                         : "Gamer Mode disabled. Worker is active.");
             } else {
@@ -330,7 +323,7 @@ public class AgentMainController {
 
                 refreshConfigLabels(rolledBackConfig);
 
-                view.setStatus("Gamer Mode change failed: " + result.error().getMessage());
+                agentStateStore.recordHeartbeatFailure("Gamer Mode change failed: " + result.error().getMessage());
                 log.warn("Gamer Mode change failed", result.error());
             }
 
@@ -347,7 +340,7 @@ public class AgentMainController {
 
             refreshConfigLabels(rolledBackConfig);
 
-            view.setStatus("Gamer Mode change failed: " + exception.getMessage());
+            agentStateStore.setLastError("Gamer Mode change failed: " + exception.getMessage());
             view.pauseResumeButton().setDisable(false);
             workerModeChangeInProgress.set(false);
             refreshActionButtonState(rolledBackConfig);
@@ -383,20 +376,27 @@ public class AgentMainController {
 
     private void handleHeartbeatResult(HeartbeatTickResult result) {
         if (result.success()) {
-            view.setStatus(result.message());
-            view.setMasterConnectionConnected();
-            view.setLastHeartbeat("Last successful heartbeat: " + formatTimestamp(result.timestamp()));
+            agentStateStore.recordSuccessfulHeartbeat(result.timestamp(), result.message());
             log.info(result.message());
             return;
         }
 
-        view.setStatus(result.message());
-        view.setMasterConnectionIssue();
+        agentStateStore.recordHeartbeatFailure(result.message());
+        log.warn(result.message(), result.error());
+    }
+
+    private void logHeartbeatResult(HeartbeatTickResult result) {
+        if (result.success()) {
+            log.info(result.message());
+            return;
+        }
+
         log.warn(result.message(), result.error());
     }
 
     private void refreshConfigLabels(AgentConfig config) {
-        Platform.runLater(() -> {
+        syncConfigurationState(config);
+        runOnFxApplicationThread(() -> {
             view.refreshConfig(config, hasStoredApiKey());
             refreshActionButtonState(config);
         });
@@ -415,37 +415,16 @@ public class AgentMainController {
                 canUseWorkerApi,
                 heartbeatRunning
         );
-        publishTrayState(config, canUseWorkerApi, heartbeatRunning);
     }
 
-    private void publishTrayState(AgentConfig config) {
-        publishTrayState(
-                config,
-                config.hasMasterBaseUrl() && config.hasWorkerId() && hasStoredApiKey(),
-                runtime.heartbeatScheduler().isRunning()
-        );
+    private void syncConfigurationState(AgentConfig config) {
+        agentStateStore.syncConfiguration(config, canUseWorkerApi(config));
     }
 
-    private void publishTrayState(AgentConfig config, boolean canUseWorkerApi, boolean heartbeatRunning) {
-        try {
-            trayStateConsumer.accept(new AgentTrayState(
-                    config.hasWorkerId(),
-                    canUseWorkerApi,
-                    config.pauseEnabled(),
-                    heartbeatRunning
-            ));
-        } catch (RuntimeException exception) {
-            log.warn("Tray state update failed", exception);
-        }
-    }
-
-    private AgentTrayState createTrayState(AgentConfig config) {
-        return new AgentTrayState(
-                config.hasWorkerId(),
-                config.hasMasterBaseUrl() && config.hasWorkerId() && hasStoredApiKey(),
-                config.pauseEnabled(),
-                runtime.heartbeatScheduler().isRunning()
-        );
+    private boolean canUseWorkerApi(AgentConfig config) {
+        return config.hasMasterBaseUrl()
+                && config.hasWorkerId()
+                && hasStoredApiKey();
     }
 
     private void updateHardwareSpec() {
@@ -458,12 +437,12 @@ public class AgentMainController {
         try {
             AgentConfigValidator.validateWorkerApiReady(config, hasStoredApiKey());
         } catch (RuntimeException exception) {
-            view.setStatus("Cannot update hardware spec: " + exception.getMessage());
+            agentStateStore.setLastError("Cannot update hardware spec: " + exception.getMessage());
             return;
         }
 
         view.updateHardwareSpecButton().setDisable(true);
-        view.setStatus("Updating hardware spec...");
+        agentStateStore.setLastMessage("Updating hardware spec...");
 
         Task<Void> task = new Task<>() {
             @Override
@@ -487,8 +466,7 @@ public class AgentMainController {
         };
 
         task.setOnSucceeded(event -> {
-            view.setStatus("Hardware spec updated.");
-            view.setMasterConnectionConnected();
+            agentStateStore.markMasterConnected("Hardware spec updated.");
             view.updateHardwareSpecButton().setDisable(false);
             refreshActionButtonState(runtime.configService().load());
         });
@@ -496,7 +474,7 @@ public class AgentMainController {
         task.setOnFailed(event -> {
             Throwable exception = task.getException();
 
-            view.setStatus("Hardware spec update failed: " + exception.getMessage());
+            agentStateStore.setLastError("Hardware spec update failed: " + exception.getMessage());
             view.updateHardwareSpecButton().setDisable(false);
             refreshActionButtonState(runtime.configService().load());
 
@@ -514,14 +492,17 @@ public class AgentMainController {
         try {
             AgentConfigValidator.validateWorkerApiReady(config, hasStoredApiKey());
 
+            agentStateStore.setHeartbeatState(HeartbeatState.STARTING);
             runtime.heartbeatScheduler().start(HEARTBEAT_INTERVAL, result ->
-                    Platform.runLater(() -> handleHeartbeatResult(result))
+                    logHeartbeatResult(result)
             );
 
             refreshActionButtonState(config);
-            view.setStatus("Heartbeat scheduler started automatically.");
+            agentStateStore.setHeartbeatState(HeartbeatState.RUNNING);
+            agentStateStore.setLastMessage("Heartbeat scheduler started automatically.");
         } catch (RuntimeException exception) {
             refreshActionButtonState(config);
+            agentStateStore.setHeartbeatState(HeartbeatState.STOPPED);
             log.info("Heartbeat scheduler was not started automatically: {}", exception.getMessage());
         }
     }
@@ -536,8 +517,17 @@ public class AgentMainController {
                 .orElseThrow(() -> new IllegalStateException("API key is required."));
     }
 
-    private static String formatTimestamp(Instant timestamp) {
-        return HEARTBEAT_TIME_FORMATTER.format(timestamp);
+    private void applyStateToView(AgentStateSnapshot snapshot) {
+        runOnFxApplicationThread(() -> view.applyAgentState(snapshot));
+    }
+
+    private static void runOnFxApplicationThread(Runnable runnable) {
+        if (Platform.isFxApplicationThread()) {
+            runnable.run();
+            return;
+        }
+
+        Platform.runLater(runnable);
     }
 
 }

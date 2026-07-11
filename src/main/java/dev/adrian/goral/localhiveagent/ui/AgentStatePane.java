@@ -112,17 +112,29 @@ class AgentStatePane extends VBox {
     }
 
     void setStatus(String status) {
+        setStatus(status, isErrorStatus(status));
+    }
+
+    void setStatus(String status, boolean error) {
         String displayStatus = status == null || status.isBlank() ? "Ready." : status;
         statusLabel.setText(displayStatus);
         statusLabel.getStyleClass().removeAll("status-message-error", "status-message-success");
 
-        String normalizedStatus = displayStatus.toLowerCase();
-        if (normalizedStatus.contains("failed") || normalizedStatus.contains("cannot")) {
+        if (error) {
             statusLabel.getStyleClass().add("status-message-error");
             return;
         }
 
         statusLabel.getStyleClass().add("status-message-success");
+    }
+
+    private static boolean isErrorStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return false;
+        }
+
+        String normalizedStatus = status.toLowerCase();
+        return normalizedStatus.contains("failed") || normalizedStatus.contains("cannot");
     }
 
     void refreshConfig(AgentConfig config, boolean apiKeyConfigured) {

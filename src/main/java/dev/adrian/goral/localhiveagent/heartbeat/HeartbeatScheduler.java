@@ -6,6 +6,7 @@ import dev.adrian.goral.localhiveagent.master.RegistrationClient;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
 import dev.adrian.goral.localhiveagent.security.CredentialStore;
+import dev.adrian.goral.localhiveagent.state.AgentStateStore;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -23,14 +24,20 @@ public final class HeartbeatScheduler implements AutoCloseable {
     private final ScheduledExecutorService executor;
     private final AtomicBoolean running;
     private final CredentialStore credentialStore;
+    private final AgentStateStore agentStateStore;
 
     private volatile ScheduledFuture<?> scheduledTask;
 
     public HeartbeatScheduler(
-            ConfigService configService, CredentialStore credentialStore, RegistrationClient registrationClient) {
+            ConfigService configService,
+            CredentialStore credentialStore,
+            RegistrationClient registrationClient,
+            AgentStateStore agentStateStore
+    ) {
         this.configService = Objects.requireNonNull(configService);
         this.registrationClient = Objects.requireNonNull(registrationClient);
         this.credentialStore = Objects.requireNonNull(credentialStore);
+        this.agentStateStore = Objects.requireNonNull(agentStateStore);
         this.executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "localhive-heartbeat");
             thread.setDaemon(true);
@@ -105,9 +112,13 @@ public final class HeartbeatScheduler implements AutoCloseable {
                     request
             );
 
-            resultConsumer.accept(HeartbeatTickResult.success(response.status()));
+            HeartbeatTickResult result = HeartbeatTickResult.success(response.status());
+            agentStateStore.recordSuccessfulHeartbeat(result.timestamp(), result.message());
+            resultConsumer.accept(result);
         } catch (RuntimeException exception) {
-            resultConsumer.accept(HeartbeatTickResult.failure(exception));
+            HeartbeatTickResult result = HeartbeatTickResult.failure(exception);
+            agentStateStore.recordHeartbeatFailure(result.message());
+            resultConsumer.accept(result);
         }
     }
 

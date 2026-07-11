@@ -1,6 +1,10 @@
 package dev.adrian.goral.localhiveagent.ui;
 
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
+import dev.adrian.goral.localhiveagent.state.AgentStateSnapshot;
+import dev.adrian.goral.localhiveagent.state.HeartbeatState;
+import dev.adrian.goral.localhiveagent.state.MasterConnectionState;
+import dev.adrian.goral.localhiveagent.state.WorkerMode;
 import dev.adrian.goral.localhiveagent.system.MachineSpec;
 import javafx.geometry.Pos;
 import javafx.scene.Parent;
@@ -17,8 +21,14 @@ import javafx.scene.layout.VBox;
 import org.kordamp.ikonli.feather.Feather;
 
 import java.nio.file.Path;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 public class AgentMainView {
+
+    private static final DateTimeFormatter HEARTBEAT_TIME_FORMATTER = DateTimeFormatter
+            .ofPattern("yyyy-MM-dd HH:mm:ss")
+            .withZone(ZoneId.systemDefault());
 
     private final AgentConfig initialConfig;
     private final MachineSpec machineSpec;
@@ -82,7 +92,6 @@ public class AgentMainView {
         VBox.setVgrow(contentScroll, Priority.ALWAYS);
 
         refreshConfig(initialConfig, initialApiKeyConfigured);
-        setInitialConnectionStatus(initialConfig);
 
         return root;
     }
@@ -107,28 +116,10 @@ public class AgentMainView {
         agentStatePane.clearApiKeyInput();
     }
 
-    public void setStatus(String status) {
-        agentStatePane.setStatus(status);
-    }
-
-    public void setLastHeartbeat(String value) {
-        lastHeartbeatBadge.setStatus(Feather.CLOCK, value, StatusBadge.SUCCESS);
-    }
-
-    public void setMasterConnectionConnected() {
-        connectionBadge.setStatus(Feather.WIFI, "Master: connected", StatusBadge.SUCCESS);
-    }
-
-    public void setMasterConnectionIssue() {
-        connectionBadge.setStatus(Feather.WIFI_OFF, "Master: attention needed", StatusBadge.DANGER);
-    }
-
     public void refreshConfig(AgentConfig config, boolean apiKeyConfigured) {
         agentStatePane.refreshConfig(config, apiKeyConfigured);
         sharedRamPane.refreshSharedRam(config.sharedRamMb());
         resourceOverviewPane.setSharedRamMb(config.sharedRamMb());
-        gamerModePane.refresh(config.pauseEnabled());
-        refreshWorkerStatus(config);
     }
 
     public void refreshActionButtonState(boolean canRegister, boolean canUseWorkerApi, boolean heartbeatRunning) {
@@ -140,11 +131,14 @@ public class AgentMainView {
         stopHeartbeatButton().setDisable(!heartbeatRunning);
         updateHardwareSpecButton().setDisable(!canUseWorkerApi);
 
-        if (heartbeatRunning) {
-            heartbeatBadge.setStatus(Feather.ACTIVITY, "Heartbeat: running", StatusBadge.SUCCESS);
-        } else {
-            heartbeatBadge.setStatus(Feather.ACTIVITY, "Heartbeat: stopped", StatusBadge.NEUTRAL);
-        }
+    }
+
+    public void applyAgentState(AgentStateSnapshot snapshot) {
+        applyMasterConnectionState(snapshot.masterConnectionState());
+        applyWorkerMode(snapshot);
+        applyHeartbeatState(snapshot.heartbeatState());
+        applyLastHeartbeat(snapshot);
+        applyLastMessage(snapshot);
     }
 
     public Button saveConfigButton() {
@@ -253,8 +247,35 @@ public class AgentMainView {
         return content;
     }
 
-    private void refreshWorkerStatus(AgentConfig config) {
-        if (!config.hasWorkerId()) {
+    private void applyMasterConnectionState(MasterConnectionState state) {
+        switch (state) {
+            case NOT_CONFIGURED -> connectionBadge.setStatus(
+                    Feather.WIFI_OFF,
+                    "Master: not configured",
+                    StatusBadge.WARNING
+            );
+            case UNKNOWN -> connectionBadge.setStatus(
+                    Feather.WIFI,
+                    "Master: configured",
+                    StatusBadge.NEUTRAL
+            );
+            case CONNECTED -> connectionBadge.setStatus(
+                    Feather.WIFI,
+                    "Master: connected",
+                    StatusBadge.SUCCESS
+            );
+            case ATTENTION_REQUIRED -> connectionBadge.setStatus(
+                    Feather.WIFI_OFF,
+                    "Master: attention needed",
+                    StatusBadge.DANGER
+            );
+        }
+    }
+
+    private void applyWorkerMode(AgentStateSnapshot snapshot) {
+        gamerModePane.refresh(snapshot.workerMode() == WorkerMode.PAUSED);
+
+        if (!snapshot.workerRegistered()) {
             workerStatusBadge.setStatus(
                     Feather.ALERT_CIRCLE,
                     "Mode: unregistered",
@@ -263,7 +284,7 @@ public class AgentMainView {
             return;
         }
 
-        if (config.pauseEnabled()) {
+        if (snapshot.workerMode() == WorkerMode.PAUSED) {
             workerStatusBadge.setStatus(Feather.PAUSE_CIRCLE, "Mode: paused", StatusBadge.WARNING);
             return;
         }
@@ -271,12 +292,35 @@ public class AgentMainView {
         workerStatusBadge.setStatus(Feather.CHECK_CIRCLE, "Mode: active", StatusBadge.SUCCESS);
     }
 
-    private void setInitialConnectionStatus(AgentConfig config) {
-        if (config.hasMasterBaseUrl()) {
-            connectionBadge.setStatus(Feather.WIFI, "Master: configured", StatusBadge.NEUTRAL);
+    private void applyHeartbeatState(HeartbeatState state) {
+        switch (state) {
+            case STOPPED -> heartbeatBadge.setStatus(Feather.ACTIVITY, "Heartbeat: stopped", StatusBadge.NEUTRAL);
+            case STARTING -> heartbeatBadge.setStatus(Feather.ACTIVITY, "Heartbeat: starting", StatusBadge.NEUTRAL);
+            case RUNNING -> heartbeatBadge.setStatus(Feather.ACTIVITY, "Heartbeat: running", StatusBadge.SUCCESS);
+            case FAILED -> heartbeatBadge.setStatus(Feather.ACTIVITY, "Heartbeat: failed", StatusBadge.DANGER);
+        }
+    }
+
+    private void applyLastHeartbeat(AgentStateSnapshot snapshot) {
+        if (snapshot.lastSuccessfulHeartbeat() == null) {
+            lastHeartbeatBadge.setStatus(
+                    Feather.CLOCK,
+                    "Last successful heartbeat: never",
+                    StatusBadge.NEUTRAL
+            );
             return;
         }
 
-        connectionBadge.setStatus(Feather.WIFI_OFF, "Master: not configured", StatusBadge.WARNING);
+        lastHeartbeatBadge.setStatus(
+                Feather.CLOCK,
+                "Last successful heartbeat: " + HEARTBEAT_TIME_FORMATTER.format(snapshot.lastSuccessfulHeartbeat()),
+                StatusBadge.SUCCESS
+        );
+    }
+
+    private void applyLastMessage(AgentStateSnapshot snapshot) {
+        boolean hasError = !snapshot.lastError().isBlank();
+        String displayMessage = hasError ? snapshot.lastError() : snapshot.lastMessage();
+        agentStatePane.setStatus(displayMessage, hasError);
     }
 }
