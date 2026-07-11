@@ -86,4 +86,9 @@ public class WindowsDpapiCredentialStore implements CredentialStore {
             Files.createDirectories(parent);
         }
     }
+
+    @Override
+    public String backendName() {
+        return "Windows DPAPI";
+    }
 }

@@ -187,7 +187,12 @@ public class RegistrationClient {
             throw new IllegalArgumentException("Master base URL cannot be blank.");
         }
 
-        String normalizedBaseUrl = removeTrailingSlashes(masterBaseUrl.trim());
+        String normalizedBaseUrl = masterBaseUrl.trim();
+        if (!normalizedBaseUrl.contains("://")) {
+            normalizedBaseUrl = "http://" + normalizedBaseUrl;
+        }
+
+        normalizedBaseUrl = removeTrailingSlashes(normalizedBaseUrl);
         String normalizedPath = path.startsWith("/") ? path : "/" + path;
 
         return URI.create(normalizedBaseUrl + normalizedPath);

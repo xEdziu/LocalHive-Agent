@@ -86,4 +86,14 @@ public class InsecureFileCredentialStore implements CredentialStore {
             // POSIX file permissions are not available on every file system.
         }
     }
+
+    @Override
+    public boolean isSecure() {
+        return false;
+    }
+
+    @Override
+    public String backendName() {
+        return "Insecure file storage";
+    }
 }

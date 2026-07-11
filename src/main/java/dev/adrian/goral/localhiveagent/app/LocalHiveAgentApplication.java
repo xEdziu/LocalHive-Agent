@@ -31,8 +31,11 @@ public class LocalHiveAgentApplication extends Application {
         log.info("Config path: {}", runtime.configService().configPath());
         log.info("Worker registered: {}", config.hasWorkerId());
         log.info("API key configured: {}", runtime.credentialStore().hasApiKey());
-        if (dev.adrian.goral.localhiveagent.security.CredentialStoreFactory.isUsingInsecureFallback()) {
-            log.warn("Using insecure file-based credential store. This is intended for development only.");
+        log.info("Credential store backend: {}", runtime.credentialStore().backendName());
+
+        if (!runtime.credentialStore().isSecure()) {
+            log.warn("Using insecure file-based credential storage. Install a supported system credential backend."
+            );
         }
         log.info("Detected machine spec: {}", machineSpec);
 

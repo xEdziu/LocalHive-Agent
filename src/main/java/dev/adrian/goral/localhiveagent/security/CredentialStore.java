@@ -13,4 +13,12 @@ public interface CredentialStore {
     default boolean hasApiKey() {
         return loadApiKey().isPresent();
     }
+
+    default boolean isSecure() {
+        return true;
+    }
+
+    default String backendName() {
+        return getClass().getSimpleName();
+    }
 }
