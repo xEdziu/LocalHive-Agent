@@ -2,13 +2,19 @@ package dev.adrian.goral.localhiveagent.ui;
 
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
 import dev.adrian.goral.localhiveagent.system.MachineSpec;
+import javafx.geometry.Pos;
+import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.control.PasswordField;
-import javafx.scene.control.Slider;
-import javafx.scene.control.TextField;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.layout.ColumnConstraints;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import org.kordamp.ikonli.feather.Feather;
 
 import java.nio.file.Path;
 
@@ -19,50 +25,64 @@ public class AgentMainView {
     private final Path configPath;
     private final int detectedTotalRamMb;
     private final boolean initialApiKeyConfigured;
+    private final String credentialBackendName;
+    private final boolean credentialBackendSecure;
 
-    private Label workerIdLabel;
-    private Label apiKeyLabel;
-    private Label statusLabel;
-    private Label lastHeartbeatLabel;
-    private Label pauseStatusLabel;
+    private StatusBadge connectionBadge;
+    private StatusBadge workerStatusBadge;
+    private StatusBadge heartbeatBadge;
+    private StatusBadge lastHeartbeatBadge;
 
-    private TextField masterBaseUrlField;
-    private TextField sharedRamMbField;
-    private PasswordField apiKeyField;
-    private Slider sharedRamSlider;
-
-    private Button saveConfigButton;
-    private Button registerButton;
-    private Button updateAllocationButton;
-    private Button pauseResumeButton;
-    private Button heartbeatNowButton;
-    private Button startHeartbeatButton;
-    private Button stopHeartbeatButton;
-    private Button updateHardwareSpecButton;
+    private ResourceOverviewPane resourceOverviewPane;
+    private SharedRamPane sharedRamPane;
+    private GamerModePane gamerModePane;
+    private AgentStatePane agentStatePane;
+    private MaintenanceActionsPane maintenanceActionsPane;
 
     public AgentMainView(
             AgentConfig initialConfig,
             MachineSpec machineSpec,
             Path configPath,
-            boolean initialApiKeyConfigured
+            boolean initialApiKeyConfigured,
+            String credentialBackendName,
+            boolean credentialBackendSecure
     ) {
         this.initialConfig = initialConfig;
         this.machineSpec = machineSpec;
         this.configPath = configPath;
         this.detectedTotalRamMb = machineSpec.totalRamMb();
         this.initialApiKeyConfigured = initialApiKeyConfigured;
+        this.credentialBackendName = credentialBackendName;
+        this.credentialBackendSecure = credentialBackendSecure;
     }
 
-    public VBox createRoot() {
-        VBox root = new VBox(16);
-        root.setStyle("-fx-padding: 24;");
-
-        root.getChildren().addAll(
-                new Label("LocalHive Agent"),
-                createConfigSection(),
-                createMachineSpecSection(),
-                createActionSection()
+    public Parent createRoot() {
+        resourceOverviewPane = new ResourceOverviewPane(initialConfig, machineSpec);
+        sharedRamPane = new SharedRamPane(initialConfig, detectedTotalRamMb);
+        gamerModePane = new GamerModePane(initialConfig);
+        agentStatePane = new AgentStatePane(
+                initialConfig,
+                configPath,
+                initialApiKeyConfigured,
+                credentialBackendName,
+                credentialBackendSecure
         );
+        maintenanceActionsPane = new MaintenanceActionsPane();
+
+        VBox root = new VBox();
+        root.getStyleClass().add("dashboard-root");
+
+        ScrollPane contentScroll = new ScrollPane(createDashboardContent());
+        contentScroll.getStyleClass().add("dashboard-scroll");
+        contentScroll.setFitToWidth(true);
+        contentScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        contentScroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+
+        root.getChildren().addAll(createHeader(), contentScroll);
+        VBox.setVgrow(contentScroll, Priority.ALWAYS);
+
+        refreshConfig(initialConfig, initialApiKeyConfigured);
+        setInitialConnectionStatus(initialConfig);
 
         return root;
     }
@@ -72,199 +92,191 @@ public class AgentMainView {
     }
 
     public String masterBaseUrlInput() {
-        return masterBaseUrlField.getText();
+        return agentStatePane.masterBaseUrlInput();
     }
 
     public String sharedRamMbInput() {
-        return sharedRamMbField.getText();
+        return sharedRamPane.sharedRamMbInput();
     }
 
     public String apiKeyInput() {
-        return apiKeyField.getText();
+        return agentStatePane.apiKeyInput();
     }
 
     public void clearApiKeyInput() {
-        apiKeyField.clear();
+        agentStatePane.clearApiKeyInput();
     }
 
     public void setStatus(String status) {
-        statusLabel.setText(status);
+        agentStatePane.setStatus(status);
     }
 
     public void setLastHeartbeat(String value) {
-        lastHeartbeatLabel.setText(value);
+        lastHeartbeatBadge.setStatus(Feather.CLOCK, value, StatusBadge.SUCCESS);
+    }
+
+    public void setMasterConnectionConnected() {
+        connectionBadge.setStatus(Feather.WIFI, "Master: connected", StatusBadge.SUCCESS);
+    }
+
+    public void setMasterConnectionIssue() {
+        connectionBadge.setStatus(Feather.WIFI_OFF, "Master: attention needed", StatusBadge.DANGER);
     }
 
     public void refreshConfig(AgentConfig config, boolean apiKeyConfigured) {
-        workerIdLabel.setText(config.hasWorkerId() ? config.workerId().toString() : "not registered");
-        apiKeyLabel.setText(apiKeyConfigured ? "configured" : "missing");
-        pauseStatusLabel.setText(String.valueOf(config.pauseEnabled()));
-        pauseResumeButton.setText(getPauseResumeButtonText(config.pauseEnabled()));
+        agentStatePane.refreshConfig(config, apiKeyConfigured);
+        sharedRamPane.refreshSharedRam(config.sharedRamMb());
+        resourceOverviewPane.setSharedRamMb(config.sharedRamMb());
+        gamerModePane.refresh(config.pauseEnabled());
+        refreshWorkerStatus(config);
     }
 
     public void refreshActionButtonState(boolean canRegister, boolean canUseWorkerApi, boolean heartbeatRunning) {
-        registerButton.setDisable(!canRegister);
-        updateAllocationButton.setDisable(!canUseWorkerApi);
-        pauseResumeButton.setDisable(!canUseWorkerApi);
-        heartbeatNowButton.setDisable(!canUseWorkerApi);
-        startHeartbeatButton.setDisable(!canUseWorkerApi || heartbeatRunning);
-        stopHeartbeatButton.setDisable(!heartbeatRunning);
-        updateHardwareSpecButton.setDisable(!canUseWorkerApi);
+        registerButton().setDisable(!canRegister);
+        updateAllocationButton().setDisable(!canUseWorkerApi);
+        pauseResumeButton().setDisable(!canUseWorkerApi);
+        heartbeatNowButton().setDisable(!canUseWorkerApi);
+        startHeartbeatButton().setDisable(!canUseWorkerApi || heartbeatRunning);
+        stopHeartbeatButton().setDisable(!heartbeatRunning);
+        updateHardwareSpecButton().setDisable(!canUseWorkerApi);
+
+        if (heartbeatRunning) {
+            heartbeatBadge.setStatus(Feather.ACTIVITY, "Heartbeat: running", StatusBadge.SUCCESS);
+        } else {
+            heartbeatBadge.setStatus(Feather.ACTIVITY, "Heartbeat: stopped", StatusBadge.NEUTRAL);
+        }
     }
 
     public Button saveConfigButton() {
-        return saveConfigButton;
+        return agentStatePane.saveConfigButton();
     }
 
     public Button registerButton() {
-        return registerButton;
+        return agentStatePane.registerButton();
     }
 
     public Button updateAllocationButton() {
-        return updateAllocationButton;
+        return sharedRamPane.updateAllocationButton();
     }
 
     public Button pauseResumeButton() {
-        return pauseResumeButton;
+        return gamerModePane.pauseResumeButton();
     }
 
     public Button heartbeatNowButton() {
-        return heartbeatNowButton;
+        return maintenanceActionsPane.heartbeatNowButton();
     }
 
     public Button startHeartbeatButton() {
-        return startHeartbeatButton;
+        return maintenanceActionsPane.startHeartbeatButton();
     }
 
     public Button stopHeartbeatButton() {
-        return stopHeartbeatButton;
+        return maintenanceActionsPane.stopHeartbeatButton();
     }
 
     public Button updateHardwareSpecButton() {
-        return updateHardwareSpecButton;
+        return maintenanceActionsPane.updateHardwareSpecButton();
     }
 
-    private GridPane createConfigSection() {
-        GridPane grid = createGrid();
+    private HBox createHeader() {
+        HBox header = new HBox(20);
+        header.setAlignment(Pos.CENTER_LEFT);
+        header.getStyleClass().add("dashboard-header");
 
-        masterBaseUrlField = new TextField(initialConfig.masterBaseUrl());
-        masterBaseUrlField.setPromptText("http://localhost:8080");
+        VBox titleBox = new VBox(4);
+        Label title = new Label("LocalHive Agent");
+        title.getStyleClass().add("app-title");
 
-        sharedRamMbField = new TextField(String.valueOf(initialConfig.sharedRamMb()));
-        sharedRamMbField.setPromptText("8192");
+        Label subtitle = new Label("Local worker dashboard");
+        subtitle.getStyleClass().add("app-subtitle");
 
-        sharedRamSlider = new Slider(0, Math.max(1024, detectedTotalRamMb), initialConfig.sharedRamMb());
-        sharedRamSlider.setShowTickLabels(true);
-        sharedRamSlider.setShowTickMarks(true);
-        sharedRamSlider.setMajorTickUnit(8192);
-        sharedRamSlider.setBlockIncrement(512);
+        titleBox.getChildren().addAll(title, subtitle);
 
-        sharedRamSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
-            int roundedValue = roundToStep(newValue.intValue(), 512);
-            sharedRamMbField.setText(String.valueOf(roundedValue));
-        });
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        sharedRamMbField.textProperty().addListener((observable, oldValue, newValue) -> {
-            if (newValue == null || newValue.isBlank()) {
-                return;
-            }
+        FlowPane statusPane = new FlowPane();
+        statusPane.setHgap(8);
+        statusPane.setVgap(8);
+        statusPane.setAlignment(Pos.CENTER_RIGHT);
+        statusPane.getStyleClass().add("header-status-pane");
 
-            try {
-                int parsedValue = Integer.parseInt(newValue.trim());
+        connectionBadge = new StatusBadge(Feather.WIFI_OFF, "Master: not configured", StatusBadge.WARNING);
+        workerStatusBadge = new StatusBadge(Feather.ALERT_CIRCLE, "Mode: unregistered", StatusBadge.WARNING);
+        heartbeatBadge = new StatusBadge(Feather.ACTIVITY, "Heartbeat: stopped", StatusBadge.NEUTRAL);
+        lastHeartbeatBadge = new StatusBadge(Feather.CLOCK, "Last successful heartbeat: never", StatusBadge.NEUTRAL);
 
-                if (parsedValue >= 0 && parsedValue <= detectedTotalRamMb) {
-                    sharedRamSlider.setValue(parsedValue);
-                }
-            } catch (NumberFormatException ignored) {
-                // Invalid input is handled during config saving.
-            }
-        });
-
-        apiKeyField = new PasswordField();
-        apiKeyField.setPromptText(initialApiKeyConfigured
-                ? "API key is configured"
-                : "Paste API key after approval");
-
-        workerIdLabel = new Label(initialConfig.hasWorkerId()
-                ? initialConfig.workerId().toString()
-                : "not registered");
-
-        apiKeyLabel = new Label(initialApiKeyConfigured ? "configured" : "missing");
-        pauseStatusLabel = new Label(String.valueOf(initialConfig.pauseEnabled()));
-
-        grid.addRow(0, new Label("Config:"), new Label(configPath.toString()));
-        grid.addRow(1, new Label("Master URL:"), masterBaseUrlField);
-        grid.addRow(2, new Label("Worker ID:"), workerIdLabel);
-        grid.addRow(3, new Label("API Key status:"), apiKeyLabel);
-        grid.addRow(4, new Label("New API Key:"), apiKeyField);
-        grid.addRow(5, new Label("Shared RAM MB:"), sharedRamMbField);
-        grid.addRow(6, new Label("Shared RAM slider:"), sharedRamSlider);
-        grid.addRow(7, new Label("Paused:"), pauseStatusLabel);
-
-        return grid;
-    }
-
-    private GridPane createMachineSpecSection() {
-        GridPane grid = createGrid();
-
-        grid.addRow(0, new Label("Hostname:"), new Label(machineSpec.hostname()));
-        grid.addRow(1, new Label("IP address:"), new Label(machineSpec.ipAddress()));
-        grid.addRow(2, new Label("OS:"), new Label(machineSpec.osType()));
-        grid.addRow(3, new Label("Total RAM:"), new Label(machineSpec.totalRamMb() + " MB"));
-        grid.addRow(4, new Label("CPU cores:"), new Label(String.valueOf(machineSpec.cpuCores())));
-        grid.addRow(5, new Label("GPU:"), new Label(machineSpec.gpuName().isBlank()
-                ? "not detected"
-                : machineSpec.gpuName()));
-
-        return grid;
-    }
-
-    private VBox createActionSection() {
-        saveConfigButton = new Button("Save Config");
-        updateAllocationButton = new Button("Update Allocation");
-        pauseResumeButton = new Button(getPauseResumeButtonText(initialConfig.pauseEnabled()));
-        registerButton = new Button("Register with Master");
-        heartbeatNowButton = new Button("Send Heartbeat Now");
-        startHeartbeatButton = new Button("Start Heartbeat");
-        stopHeartbeatButton = new Button("Stop Heartbeat");
-        updateHardwareSpecButton = new Button("Update Hardware Spec");
-
-        statusLabel = new Label("Ready.");
-        lastHeartbeatLabel = new Label("Last heartbeat: never");
-
-        VBox box = new VBox(10);
-        box.getChildren().addAll(
-                saveConfigButton,
-                updateAllocationButton,
-                updateHardwareSpecButton,
-                pauseResumeButton,
-                registerButton,
-                heartbeatNowButton,
-                startHeartbeatButton,
-                stopHeartbeatButton,
-                statusLabel,
-                lastHeartbeatLabel
+        statusPane.getChildren().addAll(
+                connectionBadge,
+                workerStatusBadge,
+                heartbeatBadge,
+                lastHeartbeatBadge
         );
 
-        return box;
+        header.getChildren().addAll(titleBox, spacer, statusPane);
+
+        return header;
     }
 
-    private static GridPane createGrid() {
-        GridPane grid = new GridPane();
-        grid.setHgap(12);
-        grid.setVgap(8);
-        return grid;
+    private VBox createDashboardContent() {
+        VBox content = new VBox(12);
+        content.getStyleClass().add("dashboard-content");
+
+        DashboardSection resourcesSection = new DashboardSection(
+                Feather.HARD_DRIVE,
+                "Resources",
+                resourceOverviewPane
+        );
+
+        GridPane dashboardGrid = new GridPane();
+        dashboardGrid.setHgap(12);
+        dashboardGrid.setVgap(12);
+
+        ColumnConstraints primaryColumn = new ColumnConstraints();
+        primaryColumn.setPercentWidth(62);
+        primaryColumn.setHgrow(Priority.ALWAYS);
+
+        ColumnConstraints secondaryColumn = new ColumnConstraints();
+        secondaryColumn.setPercentWidth(38);
+        secondaryColumn.setHgrow(Priority.ALWAYS);
+
+        dashboardGrid.getColumnConstraints().addAll(primaryColumn, secondaryColumn);
+
+        dashboardGrid.add(new DashboardSection(Feather.SLIDERS, "Shared RAM", sharedRamPane), 0, 0);
+        dashboardGrid.add(new DashboardSection(Feather.PLAY_CIRCLE, "Gamer Mode", gamerModePane), 1, 0);
+        dashboardGrid.add(new DashboardSection(Feather.INFO, "Agent State", agentStatePane), 0, 1);
+        dashboardGrid.add(new DashboardSection(Feather.TOOL, "Maintenance", maintenanceActionsPane), 1, 1);
+
+        content.getChildren().addAll(resourcesSection, dashboardGrid);
+
+        return content;
     }
 
-    private static String getPauseResumeButtonText(boolean pauseEnabled) {
-        return pauseEnabled ? "Resume" : "Pause";
-    }
-
-    private static int roundToStep(int value, int step) {
-        if (step <= 0) {
-            return value;
+    private void refreshWorkerStatus(AgentConfig config) {
+        if (!config.hasWorkerId()) {
+            workerStatusBadge.setStatus(
+                    Feather.ALERT_CIRCLE,
+                    "Mode: unregistered",
+                    StatusBadge.WARNING
+            );
+            return;
         }
 
-        return Math.round((float) value / step) * step;
+        if (config.pauseEnabled()) {
+            workerStatusBadge.setStatus(Feather.PAUSE_CIRCLE, "Mode: paused", StatusBadge.WARNING);
+            return;
+        }
+
+        workerStatusBadge.setStatus(Feather.CHECK_CIRCLE, "Mode: active", StatusBadge.SUCCESS);
+    }
+
+    private void setInitialConnectionStatus(AgentConfig config) {
+        if (config.hasMasterBaseUrl()) {
+            connectionBadge.setStatus(Feather.WIFI, "Master: configured", StatusBadge.NEUTRAL);
+            return;
+        }
+
+        connectionBadge.setStatus(Feather.WIFI_OFF, "Master: not configured", StatusBadge.WARNING);
     }
 }

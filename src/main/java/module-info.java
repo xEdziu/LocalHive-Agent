@@ -14,6 +14,7 @@ module dev.adrian.goral.localhiveagent {
 
     requires eu.hansolo.tilesfx;
     requires org.kordamp.ikonli.javafx;
+    requires org.kordamp.ikonli.feather;
 
     exports dev.adrian.goral.localhiveagent.app;
 

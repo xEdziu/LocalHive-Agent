@@ -15,12 +15,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Objects;
 
 public class AgentMainController {
 
     private static final Logger log = LoggerFactory.getLogger(AgentMainController.class);
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
+    private static final DateTimeFormatter HEARTBEAT_TIME_FORMATTER = DateTimeFormatter
+            .ofPattern("yyyy-MM-dd HH:mm:ss")
+            .withZone(ZoneId.systemDefault());
 
     private final AgentRuntime runtime;
     private final AgentMainView view;
@@ -112,6 +118,7 @@ public class AgentMainController {
             refreshConfigLabels(result.updatedConfig());
 
             view.setStatus("Registration completed: " + result.response().message());
+            view.setMasterConnectionConnected();
             view.registerButton().setDisable(true);
 
             log.info("Worker registered successfully. Worker ID: {}", result.updatedConfig().workerId());
@@ -232,6 +239,7 @@ public class AgentMainController {
 
         task.setOnSucceeded(event -> {
             view.setStatus("Allocation updated: " + runtime.configService().load().sharedRamMb() + " MB");
+            view.setMasterConnectionConnected();
             view.updateAllocationButton().setDisable(false);
             refreshActionButtonState(runtime.configService().load());
         });
@@ -345,13 +353,14 @@ public class AgentMainController {
     private void handleHeartbeatResult(HeartbeatTickResult result) {
         if (result.success()) {
             view.setStatus(result.message());
-            view.setLastHeartbeat("Last heartbeat: " + result.timestamp());
+            view.setMasterConnectionConnected();
+            view.setLastHeartbeat("Last successful heartbeat: " + formatTimestamp(result.timestamp()));
             log.info(result.message());
             return;
         }
 
         view.setStatus(result.message());
-        view.setLastHeartbeat("Last heartbeat failed: " + result.timestamp());
+        view.setMasterConnectionIssue();
         log.warn(result.message(), result.error());
     }
 
@@ -415,6 +424,7 @@ public class AgentMainController {
 
         task.setOnSucceeded(event -> {
             view.setStatus("Hardware spec updated.");
+            view.setMasterConnectionConnected();
             view.updateHardwareSpecButton().setDisable(false);
             refreshActionButtonState(runtime.configService().load());
         });
@@ -462,5 +472,8 @@ public class AgentMainController {
                 .orElseThrow(() -> new IllegalStateException("API key is required."));
     }
 
+    private static String formatTimestamp(Instant timestamp) {
+        return HEARTBEAT_TIME_FORMATTER.format(timestamp);
+    }
 
 }
