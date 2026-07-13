@@ -22,6 +22,8 @@ class SharedRamPane extends VBox {
     private final TextField sharedRamMbField;
     private final Slider sharedRamSlider;
     private final Button updateAllocationButton;
+    private boolean updatingSliderFromField;
+    private boolean updatingFieldFromSlider;
 
     SharedRamPane(AgentConfig initialConfig, int detectedTotalRamMb) {
         this.detectedTotalRamMb = detectedTotalRamMb;
@@ -63,13 +65,21 @@ class SharedRamPane extends VBox {
         HBox.setHgrow(sharedRamSlider, Priority.ALWAYS);
 
         ChangeListener<Number> sliderListener = (observable, oldValue, newValue) -> {
+            if (updatingSliderFromField) {
+                return;
+            }
+
             int roundedValue = boundedRam(roundToStep(newValue.intValue(), RAM_STEP_MB));
-            sharedRamMbField.setText(String.valueOf(roundedValue));
+            updateFieldFromSlider(roundedValue);
             updateCurrentValueLabel(roundedValue);
         };
         sharedRamSlider.valueProperty().addListener(sliderListener);
 
         sharedRamMbField.textProperty().addListener((observable, oldValue, newValue) -> {
+            if (updatingFieldFromSlider) {
+                return;
+            }
+
             if (newValue == null || newValue.isBlank()) {
                 updateCurrentValueLabel(0);
                 return;
@@ -79,7 +89,7 @@ class SharedRamPane extends VBox {
                 int parsedValue = Integer.parseInt(newValue.trim());
 
                 if (parsedValue >= 0 && parsedValue <= detectedTotalRamMb) {
-                    sharedRamSlider.setValue(parsedValue);
+                    updateSliderFromField(parsedValue);
                     updateCurrentValueLabel(parsedValue);
                 }
             } catch (NumberFormatException ignored) {
@@ -117,9 +127,39 @@ class SharedRamPane extends VBox {
 
     void refreshSharedRam(int sharedRamMb) {
         int boundedValue = boundedRam(sharedRamMb);
-        sharedRamMbField.setText(String.valueOf(boundedValue));
+        updateFieldFromSlider(boundedValue);
         sharedRamSlider.setValue(boundedValue);
         updateCurrentValueLabel(boundedValue);
+    }
+
+    private void updateFieldFromSlider(int sharedRamMb) {
+        String nextValue = String.valueOf(sharedRamMb);
+
+        if (nextValue.equals(sharedRamMbField.getText())) {
+            return;
+        }
+
+        updatingFieldFromSlider = true;
+
+        try {
+            sharedRamMbField.setText(nextValue);
+        } finally {
+            updatingFieldFromSlider = false;
+        }
+    }
+
+    private void updateSliderFromField(int sharedRamMb) {
+        if (Double.compare(sharedRamSlider.getValue(), sharedRamMb) == 0) {
+            return;
+        }
+
+        updatingSliderFromField = true;
+
+        try {
+            sharedRamSlider.setValue(sharedRamMb);
+        } finally {
+            updatingSliderFromField = false;
+        }
     }
 
     private int boundedRam(int sharedRamMb) {
