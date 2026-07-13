@@ -9,6 +9,8 @@ import dev.adrian.goral.localhiveagent.system.OshiSystemInfoProvider;
 import dev.adrian.goral.localhiveagent.system.SystemInfoProvider;
 import dev.adrian.goral.localhiveagent.security.CredentialStore;
 import dev.adrian.goral.localhiveagent.security.CredentialStoreFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
@@ -16,6 +18,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class AgentRuntime implements AutoCloseable {
+
+    private static final Logger log = LoggerFactory.getLogger(AgentRuntime.class);
 
     private final ConfigService configService;
     private final SystemInfoProvider systemInfoProvider;
@@ -49,13 +53,21 @@ public final class AgentRuntime implements AutoCloseable {
     }
 
     public static AgentRuntime createDefault() {
-        Path configDirectory = Path.of(System.getProperty("user.home"), ".localhive-agent");
-        Path configPath = configDirectory.resolve("config.json");
+        Path configDirectory = AgentPaths.agentDirectory();
+        Path configPath = AgentPaths.configPath();
 
         ConfigService configService = new ConfigService(configPath);
         SystemInfoProvider systemInfoProvider = new OshiSystemInfoProvider();
         RegistrationClient registrationClient = new RegistrationClient();
         CredentialStore credentialStore = CredentialStoreFactory.createDefault(configDirectory);
+        log.info("CredentialStore selected: {} (secure = {})",
+                credentialStore.backendName(),
+                credentialStore.isSecure());
+
+        if (!credentialStore.isSecure()) {
+            log.warn("Insecure CredentialStore selected. API key is stored in a local fallback file.");
+        }
+
         var initialConfig = configService.load();
         AgentStateStore agentStateStore = AgentStateStore.fromConfig(
                 initialConfig,
@@ -133,8 +145,10 @@ public final class AgentRuntime implements AutoCloseable {
             return;
         }
 
+        log.info("Agent runtime closing");
         heartbeatScheduler.close();
         backgroundExecutor.shutdownNow();
         agentStateStore.close();
+        log.info("Agent runtime closed");
     }
 }

@@ -55,12 +55,12 @@ public final class AgentTrayService implements AutoCloseable {
         try {
             traySupported = SystemTray.isSupported();
         } catch (RuntimeException exception) {
-            log.warn("System tray support could not be checked. Dashboard close will use the standard application lifecycle.", exception);
+            log.warn("System Tray status: support check failed. Dashboard close will use the standard application lifecycle.", exception);
             return false;
         }
 
         if (!traySupported) {
-            log.warn("System tray is not supported. Dashboard close will use the standard application lifecycle.");
+            log.warn("System Tray status: unsupported. Dashboard close will use the standard application lifecycle.");
             return false;
         }
 
@@ -83,10 +83,10 @@ public final class AgentTrayService implements AutoCloseable {
                 applyState(initialState);
             });
 
-            log.info("System tray initialized.");
+            log.info("System Tray status: initialized");
             return true;
         } catch (Exception exception) {
-            log.warn("System tray could not be initialized. Dashboard close will exit the application.", exception);
+            log.warn("System Tray status: initialization failed. Dashboard close will exit the application.", exception);
             close();
             return false;
         }
@@ -139,6 +139,7 @@ public final class AgentTrayService implements AutoCloseable {
 
                 if (currentIcon != null && currentTray != null) {
                     currentTray.remove(currentIcon);
+                    log.info("TrayIcon removed");
                 }
 
                 trayIcon = null;

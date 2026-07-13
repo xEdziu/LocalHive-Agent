@@ -53,6 +53,26 @@ class MasterClientErrorMapperTest {
     }
 
     @Test
+    void shouldRedactSensitiveHeaderNamesFromBackendMessage() {
+        String message = MasterClientErrorMapper.mapHttpError(
+                OPERATION,
+                401,
+                """
+                        {
+                          "status": "error",
+                          "message": "Rejected X-API-KEY: test-api-key and Authorization: Bearer test-token"
+                        }
+                        """,
+                JSON_MAPPER
+        );
+
+        assertFalse(message.contains("X-API-KEY"));
+        assertFalse(message.contains("test-api-key"));
+        assertFalse(message.contains("Authorization: Bearer"));
+        assertFalse(message.contains("test-token"));
+    }
+
+    @Test
     void shouldHandleEmptyResponseBody() {
         String message = MasterClientErrorMapper.mapHttpError(OPERATION, 400, "", JSON_MAPPER);
 

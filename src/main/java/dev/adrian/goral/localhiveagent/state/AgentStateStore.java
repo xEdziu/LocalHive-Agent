@@ -104,6 +104,7 @@ public final class AgentStateStore implements AutoCloseable {
             }
         } while (!snapshot.compareAndSet(previous, updated));
 
+        logStateTransitions(previous, updated);
         publish(updated);
     }
 
@@ -119,6 +120,34 @@ public final class AgentStateStore implements AutoCloseable {
             } catch (RuntimeException exception) {
                 log.warn("Agent state listener failed: {}", exception.getMessage());
             }
+        }
+    }
+
+    private static void logStateTransitions(AgentStateSnapshot previous, AgentStateSnapshot updated) {
+        if (previous.masterConnectionState() != updated.masterConnectionState()) {
+            log.info("Master connection state changed: {} -> {}",
+                    previous.masterConnectionState(),
+                    updated.masterConnectionState());
+        }
+
+        if (previous.heartbeatState() != updated.heartbeatState()) {
+            log.info("Heartbeat state changed: {} -> {}",
+                    previous.heartbeatState(),
+                    updated.heartbeatState());
+        }
+
+        if (previous.workerMode() != updated.workerMode()) {
+            log.info("Worker mode changed to {}", updated.workerMode());
+        }
+
+        if (updated.heartbeatState() == HeartbeatState.FAILED
+                && !updated.lastError().equals(previous.lastError())) {
+            log.warn("Heartbeat failed: {}", updated.lastError());
+        }
+
+        if (previous.heartbeatState() == HeartbeatState.FAILED
+                && updated.heartbeatState() == HeartbeatState.RUNNING) {
+            log.info("Heartbeat recovered");
         }
     }
 }

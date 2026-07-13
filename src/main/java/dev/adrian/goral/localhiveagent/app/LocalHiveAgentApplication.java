@@ -3,6 +3,7 @@ package dev.adrian.goral.localhiveagent.app;
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
 import dev.adrian.goral.localhiveagent.desktop.AgentTrayActions;
 import dev.adrian.goral.localhiveagent.desktop.AgentTrayService;
+import dev.adrian.goral.localhiveagent.logging.AgentLogging;
 import dev.adrian.goral.localhiveagent.system.MachineSpec;
 import dev.adrian.goral.localhiveagent.ui.AgentMainController;
 import dev.adrian.goral.localhiveagent.ui.AgentMainView;
@@ -38,12 +39,16 @@ public class LocalHiveAgentApplication extends Application {
     public void start(Stage stage) {
         AgentConfig config = runtime.configService().loadOrCreate();
         MachineSpec machineSpec = runtime.systemInfoProvider().collectMachineSpec(config.sharedRamMb());
+        boolean apiKeyConfigured = runtime.credentialStore().hasApiKey();
+        boolean workerApiReady = config.hasMasterBaseUrl()
+                && config.hasWorkerId()
+                && apiKeyConfigured;
 
-        log.info("LocalHive Agent started");
-        log.info("Config path: {}", runtime.configService().configPath());
-        log.info("Worker registered: {}", config.hasWorkerId());
-        log.info("API key configured: {}", runtime.credentialStore().hasApiKey());
-        log.info("Credential store backend: {}", runtime.credentialStore().backendName());
+        log.info("Agent configuration path: {}", runtime.configService().configPath());
+        log.info("Master URL configured: {}", config.hasMasterBaseUrl());
+        log.info("Worker ID configured: {}", config.hasWorkerId());
+        log.info("API key configured: {}", apiKeyConfigured);
+        log.info("Worker API ready: {}", workerApiReady);
 
         if (!runtime.credentialStore().isSecure()) {
             log.warn("Using insecure file-based credential storage. Install a supported system credential backend.");
@@ -54,7 +59,7 @@ public class LocalHiveAgentApplication extends Application {
                 config,
                 machineSpec,
                 runtime.configService().configPath(),
-                runtime.credentialStore().hasApiKey(),
+                apiKeyConfigured,
                 runtime.credentialStore().backendName(),
                 runtime.credentialStore().isSecure()
         );
@@ -83,14 +88,20 @@ public class LocalHiveAgentApplication extends Application {
 
     @Override
     public void stop() {
-        AgentTrayService currentTrayService = trayService;
+        try {
+            log.info("Application stop requested");
 
-        if (currentTrayService != null) {
-            currentTrayService.close();
-        }
+            AgentTrayService currentTrayService = trayService;
 
-        if (runtime != null) {
-            runtime.close();
+            if (currentTrayService != null) {
+                currentTrayService.close();
+            }
+
+            if (runtime != null) {
+                runtime.close();
+            }
+        } finally {
+            AgentLogging.closeCurrent();
         }
     }
 
@@ -112,6 +123,7 @@ public class LocalHiveAgentApplication extends Application {
 
             event.consume();
             stage.hide();
+            log.info("Dashboard hidden to tray");
             candidateTrayService.showDashboardHiddenNotificationOnce();
         });
     }
@@ -121,6 +133,7 @@ public class LocalHiveAgentApplication extends Application {
             @Override
             public void openDashboard() {
                 Platform.runLater(() -> {
+                    log.info("Dashboard restored from tray");
                     stage.show();
                     stage.setIconified(false);
                     stage.toFront();
@@ -145,7 +158,7 @@ public class LocalHiveAgentApplication extends Application {
             return;
         }
 
-        log.info("LocalHive Agent exit requested.");
+        log.info("Application shutdown requested");
 
         AgentTrayService currentTrayService = trayService;
 

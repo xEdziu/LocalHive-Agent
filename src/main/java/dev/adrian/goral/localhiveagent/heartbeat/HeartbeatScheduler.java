@@ -8,6 +8,8 @@ import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
 import dev.adrian.goral.localhiveagent.security.CredentialStore;
 import dev.adrian.goral.localhiveagent.state.AgentStateStore;
 import dev.adrian.goral.localhiveagent.state.HeartbeatState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -19,6 +21,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 public final class HeartbeatScheduler implements AutoCloseable {
+
+    private static final Logger log = LoggerFactory.getLogger(HeartbeatScheduler.class);
 
     private final ConfigService configService;
     private final RegistrationClient registrationClient;
@@ -84,10 +88,11 @@ public final class HeartbeatScheduler implements AutoCloseable {
                 TimeUnit.SECONDS
         );
         agentStateStore.setHeartbeatState(HeartbeatState.RUNNING);
+        log.info("Heartbeat scheduler started");
     }
 
     public void stop() {
-        running.set(false);
+        boolean wasRunning = running.getAndSet(false);
 
         ScheduledFuture<?> currentTask = scheduledTask;
 
@@ -96,6 +101,10 @@ public final class HeartbeatScheduler implements AutoCloseable {
         }
 
         agentStateStore.setHeartbeatState(HeartbeatState.STOPPED);
+
+        if (wasRunning) {
+            log.info("Heartbeat scheduler stopped");
+        }
     }
 
     public boolean isRunning() {

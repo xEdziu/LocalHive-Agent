@@ -90,6 +90,13 @@ public final class MasterClientErrorMapper {
     }
 
     private static String safeText(String value) {
-        return value == null ? "" : value.trim();
+        if (value == null) {
+            return "";
+        }
+
+        return value.trim()
+                .replaceAll("(?i)Authorization\\s*:\\s*Bearer\\s+\\S+", "[redacted authorization header]")
+                .replaceAll("(?i)X-API-KEY\\s*[:=]\\s*\\S+", "[redacted api key header]")
+                .replaceAll("(?i)X-API-KEY", "[redacted api key header]");
     }
 }

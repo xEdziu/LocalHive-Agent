@@ -324,7 +324,9 @@ public class AgentMainController {
                 refreshConfigLabels(rolledBackConfig);
 
                 agentStateStore.recordHeartbeatFailure("Gamer Mode change failed: " + result.error().getMessage());
+                log.warn("Worker mode update failed");
                 log.warn("Gamer Mode change failed", result.error());
+                log.info("Worker mode rollback completed");
             }
 
             view.pauseResumeButton().setDisable(false);
@@ -345,7 +347,9 @@ public class AgentMainController {
             workerModeChangeInProgress.set(false);
             refreshActionButtonState(rolledBackConfig);
 
+            log.warn("Worker mode update failed");
             log.warn("Gamer Mode change failed", exception);
+            log.info("Worker mode rollback completed");
         });
 
         runtime.backgroundExecutor().submit(task);
@@ -387,7 +391,7 @@ public class AgentMainController {
 
     private void logHeartbeatResult(HeartbeatTickResult result) {
         if (result.success()) {
-            log.info(result.message());
+            log.debug(result.message());
             return;
         }
 
