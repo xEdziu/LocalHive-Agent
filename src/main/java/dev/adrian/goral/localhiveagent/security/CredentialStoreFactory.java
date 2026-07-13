@@ -12,11 +12,11 @@ public final class CredentialStoreFactory {
         String operatingSystem = System.getProperty("os.name", "")
                 .toLowerCase(Locale.ROOT);
 
-        return create(
-                configDirectory,
+        return create(configDirectory, new CredentialStoreEnvironment(
                 operatingSystem,
-                () -> new LinuxSecretServiceCredentialStore().isAvailable()
-        );
+                isLinux(operatingSystem) && new LinuxSecretServiceCredentialStore().isAvailable(),
+                isMacOs(operatingSystem) && new MacOsKeychainCredentialStore().isAvailable()
+        ));
     }
 
     static CredentialStore create(
@@ -24,21 +24,20 @@ public final class CredentialStoreFactory {
             String operatingSystem,
             boolean linuxSecretServiceAvailable
     ) {
-        return create(
-                configDirectory,
+        return create(configDirectory, new CredentialStoreEnvironment(
                 operatingSystem,
-                () -> linuxSecretServiceAvailable
-        );
+                linuxSecretServiceAvailable,
+                false
+        ));
     }
 
-    private static CredentialStore create(
+    static CredentialStore create(
             Path configDirectory,
-            String operatingSystem,
-            LinuxSecretServiceAvailability linuxSecretServiceAvailability
+            CredentialStoreEnvironment environment
     ) {
-        String normalizedOperatingSystem = operatingSystem == null
+        String normalizedOperatingSystem = environment.operatingSystem() == null
                 ? ""
-                : operatingSystem.toLowerCase(Locale.ROOT);
+                : environment.operatingSystem().toLowerCase(Locale.ROOT);
 
         if (normalizedOperatingSystem.contains("win")) {
             return new WindowsDpapiCredentialStore(
@@ -47,13 +46,11 @@ public final class CredentialStoreFactory {
         }
 
         if (isLinux(normalizedOperatingSystem)) {
-            return createLinuxCredentialStore(configDirectory, linuxSecretServiceAvailability);
+            return createLinuxCredentialStore(configDirectory, environment.linuxSecretServiceAvailable());
         }
 
-        if (normalizedOperatingSystem.contains("mac")) {
-            return new InsecureFileCredentialStore(
-                    configDirectory.resolve("api-key.insecure")
-            );
+        if (isMacOs(normalizedOperatingSystem)) {
+            return createMacOsCredentialStore(configDirectory, environment.macOsKeychainAvailable());
         }
 
         return new InsecureFileCredentialStore(
@@ -63,10 +60,23 @@ public final class CredentialStoreFactory {
 
     private static CredentialStore createLinuxCredentialStore(
             Path configDirectory,
-            LinuxSecretServiceAvailability linuxSecretServiceAvailability
+            boolean linuxSecretServiceAvailable
     ) {
-        if (linuxSecretServiceAvailability.isAvailable()) {
+        if (linuxSecretServiceAvailable) {
             return new LinuxSecretServiceCredentialStore();
+        }
+
+        return new InsecureFileCredentialStore(
+                configDirectory.resolve("api-key.insecure")
+        );
+    }
+
+    private static CredentialStore createMacOsCredentialStore(
+            Path configDirectory,
+            boolean macOsKeychainAvailable
+    ) {
+        if (macOsKeychainAvailable) {
+            return new MacOsKeychainCredentialStore();
         }
 
         return new InsecureFileCredentialStore(
@@ -80,9 +90,7 @@ public final class CredentialStoreFactory {
                 || operatingSystem.contains("nix");
     }
 
-    @FunctionalInterface
-    private interface LinuxSecretServiceAvailability {
-
-        boolean isAvailable();
+    private static boolean isMacOs(String operatingSystem) {
+        return operatingSystem.contains("mac");
     }
 }

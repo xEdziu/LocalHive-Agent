@@ -43,8 +43,23 @@ class CredentialStoreFactoryTest {
     }
 
     @Test
-    void shouldSelectCurrentFallbackForMacOs() {
-        CredentialStore credentialStore = CredentialStoreFactory.create(tempDir, "Mac OS X", false);
+    void shouldSelectMacOsKeychainWhenAvailable() {
+        CredentialStore credentialStore = CredentialStoreFactory.create(
+                tempDir,
+                new CredentialStoreEnvironment("Mac OS X", false, true)
+        );
+
+        assertInstanceOf(MacOsKeychainCredentialStore.class, credentialStore);
+        assertEquals("macOS Keychain", credentialStore.backendName());
+        assertTrue(credentialStore.isSecure());
+    }
+
+    @Test
+    void shouldSelectInsecureFileStoreForMacOsWithoutUsableKeychain() {
+        CredentialStore credentialStore = CredentialStoreFactory.create(
+                tempDir,
+                new CredentialStoreEnvironment("Mac OS X", false, false)
+        );
 
         assertInstanceOf(InsecureFileCredentialStore.class, credentialStore);
         assertEquals("Insecure file storage", credentialStore.backendName());
