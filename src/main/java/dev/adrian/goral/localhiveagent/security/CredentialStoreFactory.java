@@ -12,17 +12,45 @@ public final class CredentialStoreFactory {
         String operatingSystem = System.getProperty("os.name", "")
                 .toLowerCase(Locale.ROOT);
 
-        if (operatingSystem.contains("win")) {
+        return create(
+                configDirectory,
+                operatingSystem,
+                () -> new LinuxSecretServiceCredentialStore().isAvailable()
+        );
+    }
+
+    static CredentialStore create(
+            Path configDirectory,
+            String operatingSystem,
+            boolean linuxSecretServiceAvailable
+    ) {
+        return create(
+                configDirectory,
+                operatingSystem,
+                () -> linuxSecretServiceAvailable
+        );
+    }
+
+    private static CredentialStore create(
+            Path configDirectory,
+            String operatingSystem,
+            LinuxSecretServiceAvailability linuxSecretServiceAvailability
+    ) {
+        String normalizedOperatingSystem = operatingSystem == null
+                ? ""
+                : operatingSystem.toLowerCase(Locale.ROOT);
+
+        if (normalizedOperatingSystem.contains("win")) {
             return new WindowsDpapiCredentialStore(
                     configDirectory.resolve("api-key.dpapi")
             );
         }
 
-        if (isLinux(operatingSystem)) {
-            return createLinuxCredentialStore(configDirectory);
+        if (isLinux(normalizedOperatingSystem)) {
+            return createLinuxCredentialStore(configDirectory, linuxSecretServiceAvailability);
         }
 
-        if (operatingSystem.contains("mac")) {
+        if (normalizedOperatingSystem.contains("mac")) {
             return new InsecureFileCredentialStore(
                     configDirectory.resolve("api-key.insecure")
             );
@@ -34,13 +62,11 @@ public final class CredentialStoreFactory {
     }
 
     private static CredentialStore createLinuxCredentialStore(
-            Path configDirectory
+            Path configDirectory,
+            LinuxSecretServiceAvailability linuxSecretServiceAvailability
     ) {
-        LinuxSecretServiceCredentialStore secretServiceStore =
-                new LinuxSecretServiceCredentialStore();
-
-        if (secretServiceStore.isAvailable()) {
-            return secretServiceStore;
+        if (linuxSecretServiceAvailability.isAvailable()) {
+            return new LinuxSecretServiceCredentialStore();
         }
 
         return new InsecureFileCredentialStore(
@@ -52,5 +78,11 @@ public final class CredentialStoreFactory {
         return operatingSystem.contains("linux")
                 || operatingSystem.contains("nux")
                 || operatingSystem.contains("nix");
+    }
+
+    @FunctionalInterface
+    private interface LinuxSecretServiceAvailability {
+
+        boolean isAvailable();
     }
 }

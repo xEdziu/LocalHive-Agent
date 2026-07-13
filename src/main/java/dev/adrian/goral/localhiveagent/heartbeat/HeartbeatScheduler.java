@@ -7,6 +7,7 @@ import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatResponse;
 import dev.adrian.goral.localhiveagent.security.CredentialStore;
 import dev.adrian.goral.localhiveagent.state.AgentStateStore;
+import dev.adrian.goral.localhiveagent.state.HeartbeatState;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -34,15 +35,31 @@ public final class HeartbeatScheduler implements AutoCloseable {
             RegistrationClient registrationClient,
             AgentStateStore agentStateStore
     ) {
+        this(
+                configService,
+                credentialStore,
+                registrationClient,
+                agentStateStore,
+                Executors.newSingleThreadScheduledExecutor(runnable -> {
+                    Thread thread = new Thread(runnable, "localhive-heartbeat");
+                    thread.setDaemon(true);
+                    return thread;
+                })
+        );
+    }
+
+    HeartbeatScheduler(
+            ConfigService configService,
+            CredentialStore credentialStore,
+            RegistrationClient registrationClient,
+            AgentStateStore agentStateStore,
+            ScheduledExecutorService executor
+    ) {
         this.configService = Objects.requireNonNull(configService);
         this.registrationClient = Objects.requireNonNull(registrationClient);
         this.credentialStore = Objects.requireNonNull(credentialStore);
         this.agentStateStore = Objects.requireNonNull(agentStateStore);
-        this.executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "localhive-heartbeat");
-            thread.setDaemon(true);
-            return thread;
-        });
+        this.executor = Objects.requireNonNull(executor);
         this.running = new AtomicBoolean(false);
     }
 
@@ -66,6 +83,7 @@ public final class HeartbeatScheduler implements AutoCloseable {
                 intervalSeconds,
                 TimeUnit.SECONDS
         );
+        agentStateStore.setHeartbeatState(HeartbeatState.RUNNING);
     }
 
     public void stop() {
@@ -76,6 +94,8 @@ public final class HeartbeatScheduler implements AutoCloseable {
         if (currentTask != null) {
             currentTask.cancel(false);
         }
+
+        agentStateStore.setHeartbeatState(HeartbeatState.STOPPED);
     }
 
     public boolean isRunning() {
@@ -86,6 +106,10 @@ public final class HeartbeatScheduler implements AutoCloseable {
     public void close() {
         stop();
         executor.shutdownNow();
+    }
+
+    void runHeartbeatOnce(Consumer<HeartbeatTickResult> resultConsumer) {
+        executeHeartbeat(resultConsumer);
     }
 
     private void executeHeartbeat(Consumer<HeartbeatTickResult> resultConsumer) {
