@@ -73,6 +73,24 @@ class MasterClientErrorMapperTest {
     }
 
     @Test
+    void shouldRedactExecutionLeaseHeaderFromBackendMessage() {
+        String message = MasterClientErrorMapper.mapHttpError(
+                OPERATION,
+                403,
+                """
+                        {
+                          "status": "error",
+                          "message": "Rejected X-EXECUTION-LEASE: lease-token-123"
+                        }
+                        """,
+                JSON_MAPPER
+        );
+
+        assertFalse(message.contains("X-EXECUTION-LEASE"));
+        assertFalse(message.contains("lease-token-123"));
+    }
+
+    @Test
     void shouldHandleEmptyResponseBody() {
         String message = MasterClientErrorMapper.mapHttpError(OPERATION, 400, "", JSON_MAPPER);
 

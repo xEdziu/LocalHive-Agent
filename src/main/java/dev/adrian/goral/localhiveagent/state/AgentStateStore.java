@@ -81,6 +81,14 @@ public final class AgentStateStore implements AutoCloseable {
         update(current -> current.withLastError(error));
     }
 
+    public void setTaskPollingEnabled(boolean taskPollingEnabled) {
+        update(current -> current.withTaskPollingEnabled(taskPollingEnabled));
+    }
+
+    public void setCurrentExecutionSummary(String summary) {
+        update(current -> current.withCurrentExecutionSummary(summary));
+    }
+
     public void recordSuccessfulHeartbeat(Instant timestamp, String message) {
         update(current -> current.withSuccessfulHeartbeat(timestamp, message));
     }
@@ -148,6 +156,10 @@ public final class AgentStateStore implements AutoCloseable {
         if (previous.heartbeatState() == HeartbeatState.FAILED
                 && updated.heartbeatState() == HeartbeatState.RUNNING) {
             log.info("Heartbeat recovered");
+        }
+
+        if (previous.taskPollingEnabled() != updated.taskPollingEnabled()) {
+            log.info("Task polling {}", updated.taskPollingEnabled() ? "enabled" : "disabled");
         }
     }
 }

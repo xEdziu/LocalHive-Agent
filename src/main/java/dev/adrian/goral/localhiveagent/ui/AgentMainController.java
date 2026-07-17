@@ -26,6 +26,7 @@ public class AgentMainController {
 
     private static final Logger log = LoggerFactory.getLogger(AgentMainController.class);
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
+    private static final Duration TASK_POLLING_INTERVAL = Duration.ofSeconds(10);
 
     private final AgentRuntime runtime;
     private final AgentMainView view;
@@ -50,6 +51,7 @@ public class AgentMainController {
         view.refreshConfig(config, hasStoredApiKey());
         refreshActionButtonState(config);
         autoStartHeartbeatIfReady(config);
+        autoStartTaskPollingIfReady(config);
     }
 
     public void toggleWorkerMode() {
@@ -81,6 +83,7 @@ public class AgentMainController {
 
             agentStateStore.setLastMessage("Config saved.");
             autoStartHeartbeatIfReady(updatedConfig);
+            autoStartTaskPollingIfReady(updatedConfig);
 
             return true;
         } catch (RuntimeException exception) {
@@ -508,6 +511,20 @@ public class AgentMainController {
             refreshActionButtonState(config);
             agentStateStore.setHeartbeatState(HeartbeatState.STOPPED);
             log.info("Heartbeat scheduler was not started automatically: {}", exception.getMessage());
+        }
+    }
+
+    private void autoStartTaskPollingIfReady(AgentConfig config) {
+        if (runtime.taskPollingService().isRunning()) {
+            return;
+        }
+
+        try {
+            AgentConfigValidator.validateWorkerApiReady(config, hasStoredApiKey());
+            runtime.taskPollingService().start(TASK_POLLING_INTERVAL);
+            agentStateStore.setLastMessage("Task polling scheduler started automatically.");
+        } catch (RuntimeException exception) {
+            log.info("Task polling scheduler was not started automatically: {}", exception.getMessage());
         }
     }
 

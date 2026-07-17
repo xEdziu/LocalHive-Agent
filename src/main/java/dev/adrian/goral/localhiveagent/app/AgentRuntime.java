@@ -3,12 +3,16 @@ package dev.adrian.goral.localhiveagent.app;
 import dev.adrian.goral.localhiveagent.config.ConfigService;
 import dev.adrian.goral.localhiveagent.heartbeat.HeartbeatScheduler;
 import dev.adrian.goral.localhiveagent.master.AgentRegistrationService;
+import dev.adrian.goral.localhiveagent.master.MasterTaskClient;
 import dev.adrian.goral.localhiveagent.master.RegistrationClient;
 import dev.adrian.goral.localhiveagent.state.AgentStateStore;
 import dev.adrian.goral.localhiveagent.system.OshiSystemInfoProvider;
 import dev.adrian.goral.localhiveagent.system.SystemInfoProvider;
 import dev.adrian.goral.localhiveagent.security.CredentialStore;
 import dev.adrian.goral.localhiveagent.security.CredentialStoreFactory;
+import dev.adrian.goral.localhiveagent.task.AgentExecutorRegistry;
+import dev.adrian.goral.localhiveagent.task.CurrentExecutionStore;
+import dev.adrian.goral.localhiveagent.task.TaskPollingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,8 +28,11 @@ public final class AgentRuntime implements AutoCloseable {
     private final ConfigService configService;
     private final SystemInfoProvider systemInfoProvider;
     private final RegistrationClient registrationClient;
+    private final MasterTaskClient taskClient;
     private final AgentRegistrationService agentRegistrationService;
     private final HeartbeatScheduler heartbeatScheduler;
+    private final TaskPollingService taskPollingService;
+    private final CurrentExecutionStore currentExecutionStore;
     private final ExecutorService backgroundExecutor;
     private final CredentialStore credentialStore;
     private final AgentStateStore agentStateStore;
@@ -35,8 +42,11 @@ public final class AgentRuntime implements AutoCloseable {
             ConfigService configService,
             SystemInfoProvider systemInfoProvider,
             RegistrationClient registrationClient,
+            MasterTaskClient taskClient,
             AgentRegistrationService agentRegistrationService,
             HeartbeatScheduler heartbeatScheduler,
+            TaskPollingService taskPollingService,
+            CurrentExecutionStore currentExecutionStore,
             ExecutorService backgroundExecutor,
             CredentialStore credentialStore,
             AgentStateStore agentStateStore
@@ -44,8 +54,11 @@ public final class AgentRuntime implements AutoCloseable {
         this.configService = configService;
         this.systemInfoProvider = systemInfoProvider;
         this.registrationClient = registrationClient;
+        this.taskClient = taskClient;
         this.agentRegistrationService = agentRegistrationService;
         this.heartbeatScheduler = heartbeatScheduler;
+        this.taskPollingService = taskPollingService;
+        this.currentExecutionStore = currentExecutionStore;
         this.backgroundExecutor = backgroundExecutor;
         this.credentialStore = credentialStore;
         this.agentStateStore = agentStateStore;
@@ -59,6 +72,7 @@ public final class AgentRuntime implements AutoCloseable {
         ConfigService configService = new ConfigService(configPath);
         SystemInfoProvider systemInfoProvider = new OshiSystemInfoProvider();
         RegistrationClient registrationClient = new RegistrationClient();
+        MasterTaskClient taskClient = new MasterTaskClient();
         CredentialStore credentialStore = CredentialStoreFactory.createDefault(configDirectory);
         log.info("CredentialStore selected: {} (secure = {})",
                 credentialStore.backendName(),
@@ -88,6 +102,16 @@ public final class AgentRuntime implements AutoCloseable {
                 agentStateStore
         );
 
+        CurrentExecutionStore currentExecutionStore = new CurrentExecutionStore();
+        TaskPollingService taskPollingService = new TaskPollingService(
+                configService,
+                credentialStore,
+                taskClient,
+                AgentExecutorRegistry.withDefaultExecutors(),
+                currentExecutionStore,
+                agentStateStore
+        );
+
         ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "localhive-agent-background");
             thread.setDaemon(true);
@@ -99,8 +123,11 @@ public final class AgentRuntime implements AutoCloseable {
                 configService,
                 systemInfoProvider,
                 registrationClient,
+                taskClient,
                 agentRegistrationService,
                 heartbeatScheduler,
+                taskPollingService,
+                currentExecutionStore,
                 backgroundExecutor,
                 credentialStore,
                 agentStateStore
@@ -119,12 +146,24 @@ public final class AgentRuntime implements AutoCloseable {
         return registrationClient;
     }
 
+    public MasterTaskClient taskClient() {
+        return taskClient;
+    }
+
     public AgentRegistrationService agentRegistrationService() {
         return agentRegistrationService;
     }
 
     public HeartbeatScheduler heartbeatScheduler() {
         return heartbeatScheduler;
+    }
+
+    public TaskPollingService taskPollingService() {
+        return taskPollingService;
+    }
+
+    public CurrentExecutionStore currentExecutionStore() {
+        return currentExecutionStore;
     }
 
     public ExecutorService backgroundExecutor() {
@@ -146,6 +185,7 @@ public final class AgentRuntime implements AutoCloseable {
         }
 
         log.info("Agent runtime closing");
+        taskPollingService.close();
         heartbeatScheduler.close();
         backgroundExecutor.shutdownNow();
         agentStateStore.close();

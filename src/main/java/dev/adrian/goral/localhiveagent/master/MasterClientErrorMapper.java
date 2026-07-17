@@ -97,6 +97,8 @@ public final class MasterClientErrorMapper {
         return value.trim()
                 .replaceAll("(?i)Authorization\\s*:\\s*Bearer\\s+\\S+", "[redacted authorization header]")
                 .replaceAll("(?i)X-API-KEY\\s*[:=]\\s*\\S+", "[redacted api key header]")
-                .replaceAll("(?i)X-API-KEY", "[redacted api key header]");
+                .replaceAll("(?i)X-API-KEY", "[redacted api key header]")
+                .replaceAll("(?i)X-EXECUTION-LEASE\\s*[:=]\\s*\\S+", "[redacted execution lease header]")
+                .replaceAll("(?i)X-EXECUTION-LEASE", "[redacted execution lease header]");
     }
 }

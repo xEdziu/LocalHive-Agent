@@ -13,7 +13,9 @@ public record AgentStateSnapshot(
         String lastMessage,
         String lastError,
         boolean workerRegistered,
-        boolean workerApiReady
+        boolean workerApiReady,
+        boolean taskPollingEnabled,
+        String currentExecutionSummary
 ) {
 
     public AgentStateSnapshot {
@@ -22,6 +24,7 @@ public record AgentStateSnapshot(
         Objects.requireNonNull(heartbeatState, "heartbeatState is required");
         lastMessage = normalize(lastMessage);
         lastError = normalize(lastError);
+        currentExecutionSummary = normalizeCurrentExecutionSummary(currentExecutionSummary);
     }
 
     public static AgentStateSnapshot initial(AgentConfig config, boolean workerApiReady, boolean heartbeatRunning) {
@@ -35,7 +38,9 @@ public record AgentStateSnapshot(
                 "Ready.",
                 "",
                 config.hasWorkerId(),
-                workerApiReady
+                workerApiReady,
+                false,
+                "none"
         );
     }
 
@@ -50,7 +55,9 @@ public record AgentStateSnapshot(
                 lastMessage,
                 lastError,
                 config.hasWorkerId(),
-                nextWorkerApiReady
+                nextWorkerApiReady,
+                taskPollingEnabled,
+                currentExecutionSummary
         );
     }
 
@@ -63,7 +70,9 @@ public record AgentStateSnapshot(
                 lastMessage,
                 lastError,
                 workerRegistered,
-                workerApiReady
+                workerApiReady,
+                taskPollingEnabled,
+                currentExecutionSummary
         );
     }
 
@@ -76,7 +85,9 @@ public record AgentStateSnapshot(
                 lastMessage,
                 lastError,
                 workerRegistered,
-                workerApiReady
+                workerApiReady,
+                taskPollingEnabled,
+                currentExecutionSummary
         );
     }
 
@@ -89,7 +100,9 @@ public record AgentStateSnapshot(
                 lastMessage,
                 lastError,
                 workerRegistered,
-                workerApiReady
+                workerApiReady,
+                taskPollingEnabled,
+                currentExecutionSummary
         );
     }
 
@@ -102,7 +115,9 @@ public record AgentStateSnapshot(
                 nextLastMessage,
                 lastError,
                 workerRegistered,
-                workerApiReady
+                workerApiReady,
+                taskPollingEnabled,
+                currentExecutionSummary
         );
     }
 
@@ -115,7 +130,9 @@ public record AgentStateSnapshot(
                 lastMessage,
                 nextLastError,
                 workerRegistered,
-                workerApiReady
+                workerApiReady,
+                taskPollingEnabled,
+                currentExecutionSummary
         );
     }
 
@@ -128,7 +145,9 @@ public record AgentStateSnapshot(
                 message,
                 "",
                 workerRegistered,
-                workerApiReady
+                workerApiReady,
+                taskPollingEnabled,
+                currentExecutionSummary
         );
     }
 
@@ -141,12 +160,44 @@ public record AgentStateSnapshot(
                 lastMessage,
                 error,
                 workerRegistered,
-                workerApiReady
+                workerApiReady,
+                taskPollingEnabled,
+                currentExecutionSummary
         );
     }
 
     public AgentStateSnapshot withClearedError() {
         return withLastError("");
+    }
+
+    public AgentStateSnapshot withTaskPollingEnabled(boolean nextTaskPollingEnabled) {
+        return new AgentStateSnapshot(
+                masterConnectionState,
+                workerMode,
+                heartbeatState,
+                lastSuccessfulHeartbeat,
+                lastMessage,
+                lastError,
+                workerRegistered,
+                workerApiReady,
+                nextTaskPollingEnabled,
+                currentExecutionSummary
+        );
+    }
+
+    public AgentStateSnapshot withCurrentExecutionSummary(String nextCurrentExecutionSummary) {
+        return new AgentStateSnapshot(
+                masterConnectionState,
+                workerMode,
+                heartbeatState,
+                lastSuccessfulHeartbeat,
+                lastMessage,
+                lastError,
+                workerRegistered,
+                workerApiReady,
+                taskPollingEnabled,
+                nextCurrentExecutionSummary
+        );
     }
 
     private MasterConnectionState resolveMasterConnectionState(AgentConfig config) {
@@ -163,5 +214,10 @@ public record AgentStateSnapshot(
 
     private static String normalize(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static String normalizeCurrentExecutionSummary(String value) {
+        String normalized = normalize(value);
+        return normalized.isBlank() ? "none" : normalized;
     }
 }
