@@ -25,9 +25,13 @@ class CurrentExecutionStoreTest {
         ));
         assertEquals(CurrentExecutionStatus.CLAIMED, claimed.status());
         assertTrue(store.hasCurrentExecution());
+        assertFalse(claimed.summary().contains("lease-token"));
+        assertFalse(claimed.toString().contains("lease-token"));
 
         CurrentExecution running = store.markRunning();
         assertEquals(CurrentExecutionStatus.RUNNING, running.status());
+        assertFalse(running.summary().contains("lease-token"));
+        assertFalse(running.toString().contains("lease-token"));
 
         LocalDateTime renewedLease = LocalDateTime.parse("2026-07-17T12:30:00");
         CurrentExecution renewed = store.updateLease(renewedLease);

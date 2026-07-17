@@ -15,10 +15,8 @@ public final class NoOpAgentExecutor implements AgentExecutor {
     @Override
     public AgentExecutionResult execute(ClaimedExecutionPayload payload, AgentExecutionContext context) {
         try {
-            String message = readMessage(payload.configuration());
-            if (!message.isBlank()) {
-                log.debug("NO_OP execution message: {}", message);
-            }
+            readMessage(payload.configuration());
+            log.debug("NO_OP executor completed. executionId={}", payload.executionId());
             return AgentExecutionResult.succeeded();
         } catch (RuntimeException exception) {
             return AgentExecutionResult.failed(FAILURE_CODE, exception.getMessage());
