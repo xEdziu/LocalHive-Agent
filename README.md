@@ -4,7 +4,7 @@ LocalHive Agent is the worker-side desktop application of LocalHive. It runs on 
 
 The Agent is a desktop application with a JavaFX dashboard and System Tray integration. It stores the Worker API key outside `config.json` through a platform credential backend when one is available.
 
-The Agent does not execute workloads or tasks yet. The current foundation is implemented and is being prepared for future Task Protocol integration.
+The Agent currently includes the initial Task Protocol path with NO_OP execution and constrained Docker workload execution. Broader workload types remain future work.
 
 ## Current Capabilities
 
@@ -20,17 +20,17 @@ Implemented:
 - Manual heartbeat controls for diagnostics.
 - Gamer Mode through Pause/Resume with rollback on failed Master update.
 - Central `AgentStateStore` used by the dashboard and tray.
+- Task polling with NO_OP execution, local task history, and constrained Docker workload execution.
 - Native or platform-aware API key storage: Windows DPAPI, Linux Secret Service, macOS Keychain, and an explicitly insecure local fallback.
 - Local bounded file logging with representative secret sanitization tests.
 - Cross-platform GitHub Actions CI for Ubuntu, Windows, and macOS.
 
 Planned:
 
-- Task Protocol integration.
 - Current Workload display.
-- Process execution.
+- Broader process execution.
 - Minecraft server workloads.
-- Docker/RCON/native packaging work described by the broader LocalHive ADR.
+- RCON/native packaging work described by the broader LocalHive ADR.
 
 ## Technology Stack
 
@@ -103,11 +103,26 @@ Current config fields:
   "masterBaseUrl": "<master-url>",
   "workerId": "<worker-id>",
   "sharedRamMb": 8192,
-  "pauseEnabled": false
+  "pauseEnabled": false,
+  "docker": {
+    "enabled": true,
+    "allowedImages": [
+      "alpine:3.20"
+    ],
+    "maxMemoryMb": 4096,
+    "maxCpuCores": 8,
+    "allowGpu": false
+  }
 }
 ```
 
 The API key is not stored in `config.json`. It is stored through the selected `CredentialStore`.
+
+### Docker Policy
+
+Docker policy is a local Agent security policy. The Master can assign a Docker workload, but the Agent runs it only when the local policy allows the requested image and resources.
+
+See [docs/docker-policy.md](docs/docker-policy.md) for the current Docker workload V1 limits, failure codes, and future extension path.
 
 ## Credential Storage
 
@@ -177,6 +192,7 @@ CI uses Temurin 21, Maven cache, and uploads Surefire reports only on failure.
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Docker Policy](docs/docker-policy.md)
 - [Security](docs/security.md)
 - [Development](docs/development.md)
 

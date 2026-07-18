@@ -15,8 +15,9 @@ The Agent is the worker-side desktop application. It is responsible for:
 - Updating the hardware specification stored by the Master.
 - Letting the user pause or resume worker availability.
 - Providing the JavaFX dashboard and System Tray lifecycle.
+- Polling and executing assigned work through registered Agent executors.
 
-The Agent is not the Master. It does not own the database, admin UI, task queue, or worker approval workflow. It does not execute task workloads yet.
+The Agent is not the Master. It does not own the database, admin UI, task queue, or worker approval workflow.
 
 ## High-Level Architecture
 
@@ -69,6 +70,7 @@ Implemented startup flow:
 - `RegistrationClient`
 - `AgentRegistrationService`
 - `HeartbeatScheduler`
+- `TaskPollingService`
 - `ExecutorService` named `localhive-agent-background`
 - `CredentialStore`
 - `AgentStateStore`
@@ -258,4 +260,6 @@ Rules:
 
 ## Future Integration Boundary
 
-Future Task Protocol support should be designed after the Master task domain and API are defined. Agent-side classes such as task clients, task executors, process execution, Minecraft workload execution, RCON, Docker orchestration, and current workload display are future work, not existing Agent capabilities.
+The current Task Protocol support is limited to registered Agent executors such as NO_OP and constrained Docker workload execution. Docker execution is governed by local Agent policy; see [docker-policy.md](docker-policy.md).
+
+Broader workload types, Minecraft workload execution, RCON, native packaging, workspace packages, artifact handling, GPU execution, and current workload display remain future work.

@@ -11,9 +11,10 @@ The current security-relevant areas are:
 - Platform credential storage.
 - Local file logging.
 - Communication with the LocalHive Master.
+- Local Docker workload policy.
 - GitHub Actions permissions.
 
-The Agent does not execute untrusted workloads yet. Future task execution and process management will require a separate threat model.
+The Agent executes only supported assigned workloads through registered executors. Docker workload V1 is constrained by local Agent policy and fixed Docker flags. Future executor expansion and broader process management will require a separate threat model.
 
 ## API Key Handling
 
@@ -124,8 +125,11 @@ Stored fields:
 - `workerId`
 - `sharedRamMb`
 - `pauseEnabled`
+- `docker`
 
 The config file is not encrypted. It intentionally does not contain the API key.
+
+Docker policy is local Agent security configuration. See [docker-policy.md](docker-policy.md) for the current Docker workload limits and failure behavior.
 
 ## Network Security
 
@@ -166,7 +170,7 @@ The current code mitigates these specific risks:
 - No code signing is documented here.
 - Installer security, auto-update signing, notarization, and native packaging are not implemented in this repository.
 - No full external security audit has been performed.
-- Future Task Executor work will need a separate threat model before running local processes or workloads.
+- Future executor expansion will need a separate threat model before adding broader local process or workload capabilities.
 
 ## Security Reporting
 

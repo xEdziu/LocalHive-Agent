@@ -53,6 +53,7 @@ src/main/java/dev/adrian/goral/localhiveagent/
   security/
   state/
   system/
+  task/
   ui/
   util/
   validation/
@@ -75,6 +76,7 @@ Package responsibilities:
 | `security` | CredentialStore implementations and backend selection. |
 | `state` | UI-independent central Agent state and listeners. |
 | `system` | OSHI machine specification detection. |
+| `task` | Task polling, current execution state, local history, and registered executors. |
 | `ui` | JavaFX dashboard view, controller, panes, icons, badges. |
 | `util` | Small shared utilities. |
 | `validation` | Config and Shared RAM validation. |
@@ -120,6 +122,7 @@ Main tested areas:
 - `InsecureFileCredentialStore`
 - `MacOsKeychainCredentialStore` through a fake backend
 - `AgentStateStore`
+- Task polling, NO_OP execution, and Docker workload policy checks
 - Logging initialization, rotation, flush/close, and representative secret sanitization
 
 The standard automated tests do not require:
@@ -214,16 +217,15 @@ Use this sequence for new Agent capabilities:
 
 ## Future Task Protocol Work
 
-Do not introduce Agent-side Task models before the Master task domain and API are defined.
+The current Agent supports the initial Task Protocol path through registered executors. Keep future additions aligned with the Master task domain and API.
 
 Future work may include:
 
-- Task Protocol integration.
 - Current Workload state and dashboard display.
 - Task assignment client.
 - Task execution manager.
 - Local process execution.
-- Docker integration.
+- Broader Docker integration.
 - Minecraft server workloads.
 - RCON and graceful game server shutdown.
 - Native image and installer packaging.
