@@ -6,6 +6,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -82,6 +83,53 @@ class ConfigServiceTest {
         assertEquals(workerId(), config.workerId());
         assertEquals(4096, config.sharedRamMb());
         assertTrue(config.pauseEnabled());
+        assertEquals(DockerPolicy.defaultPolicy(), config.docker());
+    }
+
+    @Test
+    void shouldDefaultDockerPolicyForLegacyConfigWithoutDockerSection() throws Exception {
+        Path configPath = tempDir.resolve("config.json");
+        Files.writeString(configPath, """
+                {
+                  "masterBaseUrl": "http://localhost:8080",
+                  "workerId": "123e4567-e89b-12d3-a456-426614174000",
+                  "sharedRamMb": 4096,
+                  "pauseEnabled": true
+                }
+                """);
+
+        AgentConfig config = new ConfigService(configPath).load();
+
+        assertEquals(DockerPolicy.defaultPolicy(), config.docker());
+    }
+
+    @Test
+    void shouldDefaultMissingDockerPolicyFields() throws Exception {
+        Path configPath = tempDir.resolve("config.json");
+        Files.writeString(configPath, """
+                {
+                  "masterBaseUrl": "http://localhost:8080",
+                  "workerId": "123e4567-e89b-12d3-a456-426614174000",
+                  "sharedRamMb": 4096,
+                  "pauseEnabled": true,
+                  "docker": {}
+                }
+                """);
+
+        AgentConfig config = new ConfigService(configPath).load();
+
+        assertEquals(DockerPolicy.defaultPolicy(), config.docker());
+    }
+
+    @Test
+    void shouldSaveAndLoadDockerPolicy() {
+        ConfigService configService = new ConfigService(tempDir.resolve("config.json"));
+        DockerPolicy policy = new DockerPolicy(false, List.of("localhive/test-runner:1"), 256, 2, false);
+        AgentConfig config = readyConfig().withDocker(policy);
+
+        configService.save(config);
+
+        assertEquals(policy, configService.load().docker());
     }
 
     @Test

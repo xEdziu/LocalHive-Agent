@@ -1,9 +1,12 @@
 package dev.adrian.goral.localhiveagent.task;
 
+import dev.adrian.goral.localhiveagent.config.ConfigService;
+
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 public final class AgentExecutorRegistry {
 
@@ -15,12 +18,27 @@ public final class AgentExecutorRegistry {
     private final Map<ExecutorKey, AgentExecutor> executors = new ConcurrentHashMap<>();
 
     public static AgentExecutorRegistry withDefaultExecutors() {
+        return withDefaultExecutors(DockerWorkloadExecutor::new);
+    }
+
+    public static AgentExecutorRegistry withDefaultExecutors(ConfigService configService) {
+        Objects.requireNonNull(configService, "configService is required");
+        return withDefaultExecutors(() -> new DockerWorkloadExecutor(
+                () -> configService.load().docker(),
+                new DockerWorkloadConfigParser(),
+                new DockerCommandBuilder(),
+                new DockerCliAvailabilityChecker(),
+                new ProcessDockerCommandRunner()
+        ));
+    }
+
+    private static AgentExecutorRegistry withDefaultExecutors(Supplier<AgentExecutor> dockerExecutorFactory) {
         AgentExecutorRegistry registry = new AgentExecutorRegistry();
         registry.register(NO_OP_EXECUTOR_ID, NO_OP_CONTRACT_VERSION, new NoOpAgentExecutor());
         registry.register(
                 DOCKER_WORKLOAD_EXECUTOR_ID,
                 DOCKER_WORKLOAD_CONTRACT_VERSION,
-                new DockerWorkloadExecutor()
+                dockerExecutorFactory.get()
         );
         return registry;
     }

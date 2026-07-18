@@ -111,7 +111,7 @@ public final class AgentRuntime implements AutoCloseable {
                 configService,
                 credentialStore,
                 taskClient,
-                AgentExecutorRegistry.withDefaultExecutors(),
+                AgentExecutorRegistry.withDefaultExecutors(configService),
                 currentExecutionStore,
                 taskHistoryStore,
                 agentStateStore

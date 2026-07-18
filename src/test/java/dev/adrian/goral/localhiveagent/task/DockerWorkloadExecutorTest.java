@@ -1,5 +1,6 @@
 package dev.adrian.goral.localhiveagent.task;
 
+import dev.adrian.goral.localhiveagent.config.DockerPolicy;
 import dev.adrian.goral.localhiveagent.master.dto.ClaimedExecutionPayload;
 import org.junit.jupiter.api.Test;
 
@@ -96,6 +97,19 @@ class DockerWorkloadExecutorTest {
     }
 
     @Test
+    void shouldReturnDisabledWhenDockerPolicyDisablesWorkloads() {
+        FakeRunner runner = new FakeRunner(DockerCommandResult.completed(0, "", "", 1));
+        DockerPolicy policy = new DockerPolicy(false, List.of("alpine:3.20"), 4096, 8, false);
+        DockerWorkloadExecutor executor = executor(policy, true, runner);
+
+        AgentExecutionResult result = executor.execute(payload(validConfig()), new AgentExecutionContext(CLOCK));
+
+        assertFalse(result.success());
+        assertEquals(DockerWorkloadExecutor.DOCKER_DISABLED_FAILURE_CODE, result.failureCode());
+        assertEquals(0, runner.calls);
+    }
+
+    @Test
     void shouldMapNonAllowlistedImageToFailureCode() {
         DockerWorkloadExecutor executor = executor(true, new FakeRunner(DockerCommandResult.completed(0, "", "", 1)));
 
@@ -132,7 +146,12 @@ class DockerWorkloadExecutorTest {
     }
 
     private static DockerWorkloadExecutor executor(boolean dockerAvailable, DockerCommandRunner runner) {
+        return executor(DockerPolicy.defaultPolicy(), dockerAvailable, runner);
+    }
+
+    private static DockerWorkloadExecutor executor(DockerPolicy policy, boolean dockerAvailable, DockerCommandRunner runner) {
         return new DockerWorkloadExecutor(
+                () -> policy,
                 new DockerWorkloadConfigParser(),
                 new DockerCommandBuilder(),
                 () -> dockerAvailable,

@@ -1,5 +1,6 @@
 package dev.adrian.goral.localhiveagent.task;
 
+import dev.adrian.goral.localhiveagent.config.DockerPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -35,6 +36,23 @@ class DockerWorkloadConfigParserTest {
     }
 
     @Test
+    void shouldAcceptImageAllowedByConfiguredPolicy() {
+        DockerPolicy policy = new DockerPolicy(true, List.of("localhive/test-runner:1"), 512, 2, false);
+        Map<String, Object> config = validConfig("image", "localhive/test-runner:1");
+
+        DockerWorkloadConfig parsed = parser.parse(config, policy);
+
+        assertEquals("localhive/test-runner:1", parsed.image());
+    }
+
+    @Test
+    void shouldRejectDefaultImageWhenAllowedImagesIsEmpty() {
+        DockerPolicy policy = new DockerPolicy(true, List.of(), 512, 2, false);
+
+        assertThrows(DockerImageNotAllowedException.class, () -> parser.parse(validConfig(), policy));
+    }
+
+    @Test
     void shouldRejectGpuRequired() {
         Map<String, Object> config = validConfig("gpu", Map.of("required", true));
 
@@ -63,6 +81,16 @@ class DockerWorkloadConfigParserTest {
     }
 
     @Test
+    void shouldAcceptDefaultPolicyMaximumResources() {
+        Map<String, Object> config = validConfig("resources", Map.of("memoryMb", 4096, "cpuCores", 8));
+
+        DockerWorkloadConfig parsed = parser.parse(config);
+
+        assertEquals(4096, parsed.memoryMb());
+        assertEquals(8, parsed.cpuCores());
+    }
+
+    @Test
     void shouldRejectInvalidMemory() {
         Map<String, Object> config = validConfig("resources", Map.of("memoryMb", 15, "cpuCores", 1));
 
@@ -70,10 +98,45 @@ class DockerWorkloadConfigParserTest {
     }
 
     @Test
+    void shouldRejectMemoryAboveDefaultPolicyLimit() {
+        Map<String, Object> config = validConfig("resources", Map.of("memoryMb", 4097, "cpuCores", 1));
+
+        assertThrows(DockerWorkloadConfigurationException.class, () -> parser.parse(config));
+    }
+
+    @Test
+    void shouldRejectMemoryAboveConfiguredPolicyLimit() {
+        DockerPolicy policy = new DockerPolicy(true, List.of("alpine:3.20"), 127, 8, false);
+
+        assertThrows(DockerWorkloadConfigurationException.class, () -> parser.parse(validConfig(), policy));
+    }
+
+    @Test
     void shouldRejectInvalidCpu() {
         Map<String, Object> config = validConfig("resources", Map.of("memoryMb", 128, "cpuCores", 9));
 
         assertThrows(DockerWorkloadConfigurationException.class, () -> parser.parse(config));
+    }
+
+    @Test
+    void shouldRejectCpuAboveConfiguredPolicyLimit() {
+        DockerPolicy policy = new DockerPolicy(true, List.of("alpine:3.20"), 4096, 1, false);
+        Map<String, Object> config = validConfig("resources", Map.of("memoryMb", 128, "cpuCores", 2));
+
+        assertThrows(DockerWorkloadConfigurationException.class, () -> parser.parse(config, policy));
+    }
+
+    @Test
+    void shouldStillRejectGpuWhenPolicyAllowsGpu() {
+        DockerPolicy policy = new DockerPolicy(true, List.of("alpine:3.20"), 4096, 8, true);
+        Map<String, Object> config = validConfig("gpu", Map.of("required", true));
+
+        DockerWorkloadConfigurationException exception = assertThrows(
+                DockerWorkloadConfigurationException.class,
+                () -> parser.parse(config, policy)
+        );
+
+        assertTrue(exception.getMessage().contains("not implemented yet"));
     }
 
     @Test

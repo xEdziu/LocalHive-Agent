@@ -1,6 +1,7 @@
 package dev.adrian.goral.localhiveagent.validation;
 
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
+import dev.adrian.goral.localhiveagent.config.DockerPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
@@ -59,6 +60,21 @@ class AgentConfigValidatorTest {
         );
 
         assertTrue(exception.getMessage().contains("API key"));
+    }
+
+    @Test
+    void shouldRejectMissingDockerPolicy() {
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> AgentConfigValidator.validateDockerPolicy(null)
+        );
+
+        assertTrue(exception.getMessage().contains("Docker policy"));
+    }
+
+    @Test
+    void shouldAcceptDefaultDockerPolicy() {
+        assertDoesNotThrow(() -> AgentConfigValidator.validateDockerPolicy(DockerPolicy.defaultPolicy()));
     }
 
     @Test

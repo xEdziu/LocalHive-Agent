@@ -1,6 +1,7 @@
 package dev.adrian.goral.localhiveagent.validation;
 
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
+import dev.adrian.goral.localhiveagent.config.DockerPolicy;
 
 public final class AgentConfigValidator {
 
@@ -22,6 +23,14 @@ public final class AgentConfigValidator {
 
         if (!hasApiKey) {
             throw new IllegalStateException("API key is required.");
+        }
+
+        validateDockerPolicy(config.docker());
+    }
+
+    public static void validateDockerPolicy(DockerPolicy dockerPolicy) {
+        if (dockerPolicy == null) {
+            throw new IllegalStateException("Docker policy is required.");
         }
     }
 

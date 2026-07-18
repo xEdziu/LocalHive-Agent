@@ -6,8 +6,24 @@ public record AgentConfig(
         String masterBaseUrl,
         UUID workerId,
         int sharedRamMb,
-        boolean pauseEnabled
+        boolean pauseEnabled,
+        DockerPolicy docker
 ) {
+
+    public AgentConfig {
+        masterBaseUrl = normalizeText(masterBaseUrl);
+        if (sharedRamMb < 0) {
+            throw new IllegalArgumentException("Shared RAM cannot be negative.");
+        }
+        docker = docker == null ? DockerPolicy.defaultPolicy() : docker;
+    }
+
+    public AgentConfig(String masterBaseUrl,
+                       UUID workerId,
+                       int sharedRamMb,
+                       boolean pauseEnabled) {
+        this(masterBaseUrl, workerId, sharedRamMb, pauseEnabled, DockerPolicy.defaultPolicy());
+    }
 
     public static AgentConfig empty() {
         return new AgentConfig("", null, 0, false);
@@ -26,7 +42,8 @@ public record AgentConfig(
                 normalizeText(masterBaseUrl),
                 workerId,
                 sharedRamMb,
-                pauseEnabled
+                pauseEnabled,
+                docker
         );
     }
 
@@ -35,7 +52,8 @@ public record AgentConfig(
                 masterBaseUrl,
                 workerId,
                 sharedRamMb,
-                pauseEnabled
+                pauseEnabled,
+                docker
         );
     }
 
@@ -48,7 +66,8 @@ public record AgentConfig(
                 masterBaseUrl,
                 workerId,
                 sharedRamMb,
-                pauseEnabled
+                pauseEnabled,
+                docker
         );
     }
 
@@ -57,7 +76,18 @@ public record AgentConfig(
                 masterBaseUrl,
                 workerId,
                 sharedRamMb,
-                pauseEnabled
+                pauseEnabled,
+                docker
+        );
+    }
+
+    public AgentConfig withDocker(DockerPolicy docker) {
+        return new AgentConfig(
+                masterBaseUrl,
+                workerId,
+                sharedRamMb,
+                pauseEnabled,
+                docker
         );
     }
 

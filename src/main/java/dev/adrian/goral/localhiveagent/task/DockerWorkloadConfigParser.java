@@ -1,27 +1,28 @@
 package dev.adrian.goral.localhiveagent.task;
 
+import dev.adrian.goral.localhiveagent.config.DockerPolicy;
+
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 public final class DockerWorkloadConfigParser {
-
-    public static final String ALPINE_3_20 = "alpine:3.20";
-    public static final Set<String> ALLOWED_IMAGES = Set.of(ALPINE_3_20);
 
     private static final int MIN_TIMEOUT_SECONDS = 1;
     private static final int MAX_TIMEOUT_SECONDS = 300;
     private static final int MIN_MEMORY_MB = 16;
-    private static final int MAX_MEMORY_MB = 4096;
     private static final int MIN_CPU_CORES = 1;
-    private static final int MAX_CPU_CORES = 8;
 
     public DockerWorkloadConfig parse(Map<String, Object> configuration) {
+        return parse(configuration, DockerPolicy.defaultPolicy());
+    }
+
+    public DockerWorkloadConfig parse(Map<String, Object> configuration, DockerPolicy policy) {
+        DockerPolicy dockerPolicy = policy == null ? DockerPolicy.defaultPolicy() : policy;
         if (configuration == null) {
             throw invalid("configuration is required.");
         }
 
-        String image = requireImage(configuration.get("image"));
+        String image = requireImage(configuration.get("image"), dockerPolicy);
         List<String> command = requireCommand(configuration.get("command"));
         int timeoutSeconds = requireRange(
                 configuration.get("timeoutSeconds"),
@@ -30,24 +31,37 @@ public final class DockerWorkloadConfigParser {
                 MAX_TIMEOUT_SECONDS
         );
         Map<?, ?> resources = requireObject(configuration.get("resources"), "resources");
-        int memoryMb = requireRange(resources.get("memoryMb"), "resources.memoryMb", MIN_MEMORY_MB, MAX_MEMORY_MB);
-        int cpuCores = requireRange(resources.get("cpuCores"), "resources.cpuCores", MIN_CPU_CORES, MAX_CPU_CORES);
+        int memoryMb = requireRange(
+                resources.get("memoryMb"),
+                "resources.memoryMb",
+                MIN_MEMORY_MB,
+                dockerPolicy.maxMemoryMb()
+        );
+        int cpuCores = requireRange(
+                resources.get("cpuCores"),
+                "resources.cpuCores",
+                MIN_CPU_CORES,
+                dockerPolicy.maxCpuCores()
+        );
         Map<?, ?> gpu = requireObject(configuration.get("gpu"), "gpu");
         boolean gpuRequired = requireBoolean(gpu.get("required"), "gpu.required");
+        if (gpuRequired && !dockerPolicy.allowGpu()) {
+            throw invalid("gpu.required must be false by Docker policy.");
+        }
         if (gpuRequired) {
-            throw invalid("gpu.required must be false.");
+            throw invalid("GPU Docker execution is not implemented yet.");
         }
 
         return new DockerWorkloadConfig(image, command, timeoutSeconds, memoryMb, cpuCores, false);
     }
 
-    private static String requireImage(Object value) {
+    private static String requireImage(Object value, DockerPolicy policy) {
         if (!(value instanceof String image) || image.isBlank()) {
             throw invalid("image is required.");
         }
 
         String normalized = image.trim();
-        if (!ALLOWED_IMAGES.contains(normalized)) {
+        if (!policy.allowedImages().contains(normalized)) {
             throw new DockerImageNotAllowedException(normalized);
         }
         return normalized;

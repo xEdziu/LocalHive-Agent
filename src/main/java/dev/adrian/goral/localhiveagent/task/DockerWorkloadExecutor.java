@@ -1,5 +1,6 @@
 package dev.adrian.goral.localhiveagent.task;
 
+import dev.adrian.goral.localhiveagent.config.DockerPolicy;
 import dev.adrian.goral.localhiveagent.master.dto.ClaimedExecutionPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -7,9 +8,11 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 public final class DockerWorkloadExecutor implements AgentExecutor {
 
+    public static final String DOCKER_DISABLED_FAILURE_CODE = "DOCKER_DISABLED";
     public static final String INVALID_CONFIGURATION_FAILURE_CODE = "DOCKER_WORKLOAD_INVALID_CONFIGURATION";
     public static final String IMAGE_NOT_ALLOWED_FAILURE_CODE = "DOCKER_IMAGE_NOT_ALLOWED";
     public static final String DOCKER_UNAVAILABLE_FAILURE_CODE = "DOCKER_UNAVAILABLE";
@@ -19,6 +22,7 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
     private static final Logger log = LoggerFactory.getLogger(DockerWorkloadExecutor.class);
     private static final int FAILURE_MESSAGE_OUTPUT_LIMIT = 512;
 
+    private final Supplier<DockerPolicy> policyProvider;
     private final DockerWorkloadConfigParser configParser;
     private final DockerCommandBuilder commandBuilder;
     private final DockerAvailabilityChecker availabilityChecker;
@@ -26,6 +30,7 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
 
     public DockerWorkloadExecutor() {
         this(
+                DockerPolicy::defaultPolicy,
                 new DockerWorkloadConfigParser(),
                 new DockerCommandBuilder(),
                 new DockerCliAvailabilityChecker(),
@@ -37,6 +42,15 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
                            DockerCommandBuilder commandBuilder,
                            DockerAvailabilityChecker availabilityChecker,
                            DockerCommandRunner commandRunner) {
+        this(DockerPolicy::defaultPolicy, configParser, commandBuilder, availabilityChecker, commandRunner);
+    }
+
+    DockerWorkloadExecutor(Supplier<DockerPolicy> policyProvider,
+                           DockerWorkloadConfigParser configParser,
+                           DockerCommandBuilder commandBuilder,
+                           DockerAvailabilityChecker availabilityChecker,
+                           DockerCommandRunner commandRunner) {
+        this.policyProvider = Objects.requireNonNull(policyProvider, "policyProvider is required");
         this.configParser = Objects.requireNonNull(configParser, "configParser is required");
         this.commandBuilder = Objects.requireNonNull(commandBuilder, "commandBuilder is required");
         this.availabilityChecker = Objects.requireNonNull(availabilityChecker, "availabilityChecker is required");
@@ -48,8 +62,13 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
         Objects.requireNonNull(payload, "payload is required");
 
         DockerWorkloadConfig config;
+        DockerPolicy policy;
         try {
-            config = configParser.parse(payload.configuration());
+            policy = currentPolicy();
+            if (!policy.enabled()) {
+                return AgentExecutionResult.failed(DOCKER_DISABLED_FAILURE_CODE, "Docker workloads are disabled.");
+            }
+            config = configParser.parse(payload.configuration(), policy);
         } catch (DockerImageNotAllowedException exception) {
             return AgentExecutionResult.failed(IMAGE_NOT_ALLOWED_FAILURE_CODE, exception.getMessage());
         } catch (DockerWorkloadConfigurationException exception) {
@@ -108,6 +127,10 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
         } catch (RuntimeException exception) {
             return false;
         }
+    }
+
+    private DockerPolicy currentPolicy() {
+        return Objects.requireNonNullElseGet(policyProvider.get(), DockerPolicy::defaultPolicy);
     }
 
     private static String shortMessage(String prefix, String detail) {
