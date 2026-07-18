@@ -1,6 +1,7 @@
 package dev.adrian.goral.localhiveagent.app;
 
 import java.nio.file.Path;
+import java.util.UUID;
 
 public final class AgentPaths {
 
@@ -8,6 +9,9 @@ public final class AgentPaths {
     private static final String CONFIG_FILE_NAME = "config.json";
     private static final String LOGS_DIRECTORY_NAME = "logs";
     private static final String TASK_HISTORY_FILE_NAME = "task-history.sqlite";
+    private static final String WORKSPACES_DIRECTORY_NAME = "workspaces";
+    private static final String WORKSPACE_PACKAGE_FILE_NAME = "package.zip";
+    private static final String WORKSPACE_UNPACK_DIRECTORY_NAME = "workspace";
 
     private AgentPaths() {
     }
@@ -26,5 +30,24 @@ public final class AgentPaths {
 
     public static Path taskHistoryPath() {
         return agentDirectory().resolve(TASK_HISTORY_FILE_NAME);
+    }
+
+    public static Path workspacesDirectory() {
+        return agentDirectory().resolve(WORKSPACES_DIRECTORY_NAME);
+    }
+
+    public static Path executionWorkspaceDirectory(UUID executionId) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("executionId is required");
+        }
+        return workspacesDirectory().resolve(executionId.toString());
+    }
+
+    public static Path executionWorkspacePackagePath(UUID executionId) {
+        return executionWorkspaceDirectory(executionId).resolve(WORKSPACE_PACKAGE_FILE_NAME);
+    }
+
+    public static Path executionWorkspaceUnpackDirectory(UUID executionId) {
+        return executionWorkspaceDirectory(executionId).resolve(WORKSPACE_UNPACK_DIRECTORY_NAME);
     }
 }

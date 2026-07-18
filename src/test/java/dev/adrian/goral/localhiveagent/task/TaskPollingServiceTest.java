@@ -171,6 +171,22 @@ class TaskPollingServiceTest {
     }
 
     @Test
+    void shouldPassMasterContextToExecutor() {
+        RecordingAgentExecutor executor = new RecordingAgentExecutor();
+        AgentExecutorRegistry registry = AgentExecutorRegistry.withDefaultExecutors();
+        registry.register("localhive.recording-test", 1, executor);
+        TestFixture fixture = createFixture(false, true, registry);
+        fixture.taskClient.nextClaim = Optional.of(payload("localhive.recording-test", 1, NOW.plusMinutes(1)));
+
+        fixture.startAndRunOnce();
+
+        assertEquals("http://localhost:8080", executor.context.masterBaseUrl());
+        assertEquals(WORKER_ID, executor.context.workerId());
+        assertEquals(API_KEY, executor.context.apiKey());
+        assertFalse(executor.context.toString().contains(API_KEY));
+    }
+
+    @Test
     void shouldReportNoOpFailureCodeWhenNoOpExecutorFails() {
         TestFixture fixture = createFixture(false, true, AgentExecutorRegistry.withDefaultExecutors());
         fixture.taskClient.nextClaim = Optional.of(new ClaimedExecutionPayload(
@@ -600,6 +616,17 @@ class TaskPollingServiceTest {
         @Override
         public Object get(Object key) {
             throw new IllegalStateException("configuration unavailable");
+        }
+    }
+
+    private static final class RecordingAgentExecutor implements AgentExecutor {
+
+        private AgentExecutionContext context;
+
+        @Override
+        public AgentExecutionResult execute(ClaimedExecutionPayload payload, AgentExecutionContext context) {
+            this.context = context;
+            return AgentExecutionResult.succeeded();
         }
     }
 

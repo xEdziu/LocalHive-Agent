@@ -6,13 +6,17 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DockerWorkloadConfigParserTest {
+
+    private static final UUID WORKSPACE_ARTIFACT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
     private final DockerWorkloadConfigParser parser = new DockerWorkloadConfigParser();
 
@@ -26,6 +30,16 @@ class DockerWorkloadConfigParserTest {
         assertEquals(128, config.memoryMb());
         assertEquals(1, config.cpuCores());
         assertFalse(config.gpuRequired());
+        assertNull(config.workspace());
+    }
+
+    @Test
+    void shouldParseValidConfigWithWorkspace() {
+        DockerWorkloadConfig config = parser.parse(validConfig("workspace", validWorkspaceConfig()));
+
+        assertEquals(WORKSPACE_ARTIFACT_ID, config.workspace().artifactId());
+        assertEquals("/workspace", config.workspace().mountPath());
+        assertTrue(config.workspace().readOnly());
     }
 
     @Test
@@ -69,6 +83,42 @@ class DockerWorkloadConfigParserTest {
     @Test
     void shouldRejectBlankCommandElement() {
         Map<String, Object> config = validConfig("command", List.of("sh", "   "));
+
+        assertThrows(DockerWorkloadConfigurationException.class, () -> parser.parse(config));
+    }
+
+    @Test
+    void shouldRejectWorkspaceWithoutArtifactId() {
+        Map<String, Object> workspace = new HashMap<>(validWorkspaceConfig());
+        workspace.remove("artifactId");
+        Map<String, Object> config = validConfig("workspace", workspace);
+
+        assertThrows(DockerWorkloadConfigurationException.class, () -> parser.parse(config));
+    }
+
+    @Test
+    void shouldRejectWorkspaceArtifactIdThatIsNotUuid() {
+        Map<String, Object> workspace = new HashMap<>(validWorkspaceConfig());
+        workspace.put("artifactId", "not-a-uuid");
+        Map<String, Object> config = validConfig("workspace", workspace);
+
+        assertThrows(DockerWorkloadConfigurationException.class, () -> parser.parse(config));
+    }
+
+    @Test
+    void shouldRejectWorkspaceMountPathOtherThanWorkspace() {
+        Map<String, Object> workspace = new HashMap<>(validWorkspaceConfig());
+        workspace.put("mountPath", "/data");
+        Map<String, Object> config = validConfig("workspace", workspace);
+
+        assertThrows(DockerWorkloadConfigurationException.class, () -> parser.parse(config));
+    }
+
+    @Test
+    void shouldRejectWritableWorkspaceMount() {
+        Map<String, Object> workspace = new HashMap<>(validWorkspaceConfig());
+        workspace.put("readOnly", false);
+        Map<String, Object> config = validConfig("workspace", workspace);
 
         assertThrows(DockerWorkloadConfigurationException.class, () -> parser.parse(config));
     }
@@ -163,5 +213,13 @@ class DockerWorkloadConfigParserTest {
         Map<String, Object> config = new HashMap<>(validConfig());
         config.put(key, value);
         return config;
+    }
+
+    private static Map<String, Object> validWorkspaceConfig() {
+        return Map.of(
+                "artifactId", WORKSPACE_ARTIFACT_ID.toString(),
+                "mountPath", "/workspace",
+                "readOnly", true
+        );
     }
 }

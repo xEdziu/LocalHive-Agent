@@ -7,10 +7,15 @@ import dev.adrian.goral.localhiveagent.master.dto.LeaseRenewalResponse;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -23,10 +28,12 @@ public class MasterTaskClient {
     private static final String EXECUTION_LEASE_HEADER = "X-EXECUTION-LEASE";
     private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(10);
+    public static final long MAX_ARTIFACT_DOWNLOAD_BYTES = 50L * 1024L * 1024L;
 
     private final HttpClient httpClient;
     private final JsonMapper jsonMapper;
     private final Duration requestTimeout;
+    private final long maxArtifactDownloadBytes;
 
     public MasterTaskClient() {
         this(
@@ -40,9 +47,17 @@ public class MasterTaskClient {
     }
 
     public MasterTaskClient(HttpClient httpClient, JsonMapper jsonMapper, Duration requestTimeout) {
+        this(httpClient, jsonMapper, requestTimeout, MAX_ARTIFACT_DOWNLOAD_BYTES);
+    }
+
+    MasterTaskClient(HttpClient httpClient,
+                     JsonMapper jsonMapper,
+                     Duration requestTimeout,
+                     long maxArtifactDownloadBytes) {
         this.httpClient = httpClient;
         this.jsonMapper = jsonMapper;
         this.requestTimeout = requestTimeout;
+        this.maxArtifactDownloadBytes = maxArtifactDownloadBytes;
     }
 
     public Optional<ClaimedExecutionPayload> claimNext(String masterBaseUrl, UUID workerId, String apiKey) {
@@ -123,6 +138,35 @@ public class MasterTaskClient {
         return readJson(response.body(), LeaseRenewalResponse.class).leaseExpiresAtDateTime();
     }
 
+    public void downloadExecutionArtifact(String masterBaseUrl,
+                                          UUID workerId,
+                                          UUID executionId,
+                                          UUID artifactId,
+                                          String apiKey,
+                                          String leaseToken,
+                                          Path targetFile) {
+        validateExecutionIdentity(workerId, executionId, apiKey, leaseToken);
+        if (artifactId == null) {
+            throw new IllegalArgumentException("Artifact ID cannot be null.");
+        }
+        if (targetFile == null) {
+            throw new IllegalArgumentException("Target file cannot be null.");
+        }
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(buildUri(masterBaseUrl, executionPath(workerId, executionId, "artifacts/" + artifactId + "/download")))
+                .timeout(requestTimeout)
+                .header("Accept", "application/octet-stream")
+                .header(API_KEY_HEADER, apiKey)
+                .header(EXECUTION_LEASE_HEADER, leaseToken)
+                .GET()
+                .build();
+
+        HttpResponse<InputStream> response = sendDownload(request);
+        ensureDownloadSuccessful(response);
+        writeDownload(response.body(), targetFile);
+    }
+
     private void sendExecutionStatus(String masterBaseUrl,
                                      UUID workerId,
                                      UUID executionId,
@@ -168,6 +212,106 @@ public class MasterTaskClient {
                     userMessage,
                     exception
             );
+        }
+    }
+
+    private HttpResponse<InputStream> sendDownload(HttpRequest request) {
+        try {
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new MasterClientException(
+                    "Artifact download request was interrupted.",
+                    "Artifact download request was interrupted.",
+                    exception
+            );
+        } catch (IOException exception) {
+            String userMessage = MasterClientErrorMapper.mapConnectionError("Download execution artifact", exception);
+
+            throw new MasterClientException(
+                    "Artifact download request failed.",
+                    userMessage,
+                    exception
+            );
+        }
+    }
+
+    private void ensureDownloadSuccessful(HttpResponse<InputStream> response) {
+        if (response.statusCode() == 200) {
+            return;
+        }
+
+        closeQuietly(response.body());
+        throw new MasterClientException(
+                "Download execution artifact failed.",
+                "Download execution artifact: Master rejected artifact download.",
+                response.statusCode(),
+                ""
+        );
+    }
+
+    private void writeDownload(InputStream input, Path targetFile) {
+        Path target = targetFile.toAbsolutePath().normalize();
+        try (InputStream body = input) {
+            Path parent = target.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            try (OutputStream output = Files.newOutputStream(
+                    target,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE
+            )) {
+                copyWithLimit(body, output);
+            }
+        } catch (IOException exception) {
+            deletePartialDownload(target);
+            throw new MasterClientException(
+                    "Artifact download failed.",
+                    "Download execution artifact: Failed to write workspace package.",
+                    exception
+            );
+        } catch (MasterClientException exception) {
+            deletePartialDownload(target);
+            throw exception;
+        }
+    }
+
+    private void copyWithLimit(InputStream input, OutputStream output) throws IOException {
+        byte[] buffer = new byte[8192];
+        long totalBytes = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            totalBytes += read;
+            if (totalBytes > maxArtifactDownloadBytes) {
+                throw new MasterClientException(
+                        "Artifact download exceeded maximum size.",
+                        "Download execution artifact: Workspace package exceeds 50 MB.",
+                        -1,
+                        ""
+                );
+            }
+            output.write(buffer, 0, read);
+        }
+    }
+
+    private static void deletePartialDownload(Path targetFile) {
+        try {
+            Files.deleteIfExists(targetFile);
+        } catch (IOException ignored) {
+            // Best effort cleanup; the original download failure is more important.
+        }
+    }
+
+    private static void closeQuietly(InputStream input) {
+        if (input == null) {
+            return;
+        }
+        try {
+            input.close();
+        } catch (IOException ignored) {
+            // Nothing useful to report when closing an unused error body.
         }
     }
 

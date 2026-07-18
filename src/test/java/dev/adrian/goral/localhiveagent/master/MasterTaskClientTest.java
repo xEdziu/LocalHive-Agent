@@ -7,8 +7,10 @@ import tools.jackson.databind.json.JsonMapper;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.Authenticator;
 import java.net.CookieHandler;
 import java.net.ProxySelector;
@@ -19,6 +21,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayDeque;
@@ -30,6 +34,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -40,9 +45,13 @@ class MasterTaskClientTest {
 
     private static final UUID WORKER_ID = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
     private static final UUID EXECUTION_ID = UUID.fromString("223e4567-e89b-12d3-a456-426614174000");
+    private static final UUID ARTIFACT_ID = UUID.fromString("323e4567-e89b-12d3-a456-426614174000");
     private static final String MASTER_BASE_URL = "http://localhost:8080/";
     private static final String API_KEY = "worker-api-key";
     private static final String LEASE_TOKEN = "lease-token";
+
+    @TempDir
+    private Path tempDir;
 
     @Test
     void shouldClaimAssignedExecution() {
@@ -146,6 +155,90 @@ class MasterTaskClientTest {
         assertTrue(exception.getMessage().contains("Master task communication"));
     }
 
+    @Test
+    void shouldDownloadExecutionArtifactFromExecutionScopedEndpoint() throws IOException {
+        FakeHttpClient httpClient = new FakeHttpClient();
+        byte[] packageBytes = "workspace-package".getBytes(StandardCharsets.UTF_8);
+        httpClient.enqueueBytes(200, packageBytes);
+        MasterTaskClient client = createClient(httpClient);
+        Path target = tempDir.resolve("package.zip");
+
+        client.downloadExecutionArtifact(
+                MASTER_BASE_URL,
+                WORKER_ID,
+                EXECUTION_ID,
+                ARTIFACT_ID,
+                API_KEY,
+                LEASE_TOKEN,
+                target
+        );
+
+        assertEquals("workspace-package", Files.readString(target));
+        RecordedRequest request = httpClient.requests.getFirst();
+        assertEquals("GET", request.method());
+        assertEquals(
+                "/api/workers/" + WORKER_ID + "/executions/" + EXECUTION_ID
+                        + "/artifacts/" + ARTIFACT_ID + "/download",
+                request.path()
+        );
+        assertEquals(API_KEY, request.header("X-API-KEY"));
+        assertEquals(LEASE_TOKEN, request.header("X-EXECUTION-LEASE"));
+        assertEquals("", request.body());
+    }
+
+    @Test
+    void shouldRejectDownloadedArtifactOverLimitWithoutKeepingPartialFile() {
+        FakeHttpClient httpClient = new FakeHttpClient();
+        httpClient.enqueueBytes(200, "123456789".getBytes(StandardCharsets.UTF_8));
+        MasterTaskClient client = new MasterTaskClient(
+                httpClient,
+                JsonMapper.builder().build(),
+                Duration.ofSeconds(1),
+                8
+        );
+        Path target = tempDir.resolve("too-large.zip");
+
+        MasterClientException exception = assertThrows(
+                MasterClientException.class,
+                () -> client.downloadExecutionArtifact(
+                        MASTER_BASE_URL,
+                        WORKER_ID,
+                        EXECUTION_ID,
+                        ARTIFACT_ID,
+                        API_KEY,
+                        LEASE_TOKEN,
+                        target
+                )
+        );
+
+        assertTrue(exception.getMessage().contains("exceeds 50 MB"));
+        assertFalse(exception.getMessage().contains(LEASE_TOKEN));
+        assertFalse(Files.exists(target));
+    }
+
+    @Test
+    void shouldNotIncludeLeaseTokenOrResponseBodyInDownloadHttpErrorMessage() {
+        FakeHttpClient httpClient = new FakeHttpClient();
+        httpClient.enqueueBytes(403, ("denied " + LEASE_TOKEN).getBytes(StandardCharsets.UTF_8));
+        MasterTaskClient client = createClient(httpClient);
+
+        MasterClientException exception = assertThrows(
+                MasterClientException.class,
+                () -> client.downloadExecutionArtifact(
+                        MASTER_BASE_URL,
+                        WORKER_ID,
+                        EXECUTION_ID,
+                        ARTIFACT_ID,
+                        API_KEY,
+                        LEASE_TOKEN,
+                        tempDir.resolve("package.zip")
+                )
+        );
+
+        assertFalse(exception.getMessage().contains(LEASE_TOKEN));
+        assertFalse(exception.responseBody().contains(LEASE_TOKEN));
+    }
+
     private static MasterTaskClient createClient(FakeHttpClient httpClient) {
         return new MasterTaskClient(httpClient, JsonMapper.builder().build(), Duration.ofSeconds(1));
     }
@@ -171,12 +264,16 @@ class MasterTaskClientTest {
 
     private static final class FakeHttpClient extends HttpClient {
 
-        private final ArrayDeque<FakeHttpResponse<String>> responses = new ArrayDeque<>();
+        private final ArrayDeque<FakeHttpResponse<?>> responses = new ArrayDeque<>();
         private final List<RecordedRequest> requests = new ArrayList<>();
         private boolean throwIo;
 
         private void enqueue(int statusCode, String body) {
             responses.add(new FakeHttpResponse<>(statusCode, body));
+        }
+
+        private void enqueueBytes(int statusCode, byte[] body) {
+            responses.add(new FakeHttpResponse<>(statusCode, new ByteArrayInputStream(body)));
         }
 
         @Override

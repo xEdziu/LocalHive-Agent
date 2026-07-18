@@ -4,6 +4,7 @@ import dev.adrian.goral.localhiveagent.config.DockerPolicy;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 public final class DockerWorkloadConfigParser {
 
@@ -52,7 +53,9 @@ public final class DockerWorkloadConfigParser {
             throw invalid("GPU Docker execution is not implemented yet.");
         }
 
-        return new DockerWorkloadConfig(image, command, timeoutSeconds, memoryMb, cpuCores, false);
+        DockerWorkspaceConfig workspace = parseWorkspace(configuration.get("workspace"));
+
+        return new DockerWorkloadConfig(image, command, timeoutSeconds, memoryMb, cpuCores, false, workspace);
     }
 
     private static String requireImage(Object value, DockerPolicy policy) {
@@ -120,6 +123,53 @@ public final class DockerWorkloadConfigParser {
             throw invalid(fieldName + " is required.");
         }
         return bool;
+    }
+
+    private static DockerWorkspaceConfig parseWorkspace(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof Map<?, ?> workspace)) {
+            throw invalid("workspace must be an object.");
+        }
+
+        return new DockerWorkspaceConfig(
+                requireUuid(workspace.get("artifactId"), "workspace.artifactId"),
+                requireExactString(workspace.get("mountPath"), "workspace.mountPath", "/workspace"),
+                requireTrue(workspace.get("readOnly"), "workspace.readOnly")
+        );
+    }
+
+    private static UUID requireUuid(Object value, String fieldName) {
+        if (!(value instanceof String text) || text.isBlank()) {
+            throw invalid(fieldName + " is required.");
+        }
+        try {
+            return UUID.fromString(text.trim());
+        } catch (IllegalArgumentException exception) {
+            throw invalid(fieldName + " must be a valid UUID.");
+        }
+    }
+
+    private static String requireExactString(Object value, String fieldName, String expected) {
+        if (!(value instanceof String text) || text.isBlank()) {
+            throw invalid(fieldName + " is required.");
+        }
+        String normalized = text.trim();
+        if (!expected.equals(normalized)) {
+            throw invalid(fieldName + " must be " + expected + ".");
+        }
+        return normalized;
+    }
+
+    private static boolean requireTrue(Object value, String fieldName) {
+        if (!(value instanceof Boolean bool)) {
+            throw invalid(fieldName + " is required.");
+        }
+        if (!bool) {
+            throw invalid(fieldName + " must be true.");
+        }
+        return true;
     }
 
     private static DockerWorkloadConfigurationException invalid(String message) {

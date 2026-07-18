@@ -1,6 +1,7 @@
 package dev.adrian.goral.localhiveagent.task;
 
 import dev.adrian.goral.localhiveagent.config.DockerPolicy;
+import dev.adrian.goral.localhiveagent.master.MasterClientException;
 import dev.adrian.goral.localhiveagent.master.dto.ClaimedExecutionPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +19,9 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
     public static final String DOCKER_UNAVAILABLE_FAILURE_CODE = "DOCKER_UNAVAILABLE";
     public static final String TIMEOUT_FAILURE_CODE = "DOCKER_WORKLOAD_TIMEOUT";
     public static final String WORKLOAD_FAILED_FAILURE_CODE = "DOCKER_WORKLOAD_FAILED";
+    public static final String WORKSPACE_ARTIFACT_DOWNLOAD_FAILED_CODE = "WORKSPACE_ARTIFACT_DOWNLOAD_FAILED";
+    public static final String WORKSPACE_PACKAGE_INVALID_CODE = "WORKSPACE_PACKAGE_INVALID";
+    public static final String WORKSPACE_UNPACK_FAILED_CODE = "WORKSPACE_UNPACK_FAILED";
 
     private static final Logger log = LoggerFactory.getLogger(DockerWorkloadExecutor.class);
     private static final int FAILURE_MESSAGE_OUTPUT_LIMIT = 512;
@@ -27,6 +31,7 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
     private final DockerCommandBuilder commandBuilder;
     private final DockerAvailabilityChecker availabilityChecker;
     private final DockerCommandRunner commandRunner;
+    private final WorkspacePreparer workspacePreparer;
 
     public DockerWorkloadExecutor() {
         this(
@@ -34,7 +39,8 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
                 new DockerWorkloadConfigParser(),
                 new DockerCommandBuilder(),
                 new DockerCliAvailabilityChecker(),
-                new ProcessDockerCommandRunner()
+                new ProcessDockerCommandRunner(),
+                new WorkspaceArtifactService()
         );
     }
 
@@ -50,11 +56,21 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
                            DockerCommandBuilder commandBuilder,
                            DockerAvailabilityChecker availabilityChecker,
                            DockerCommandRunner commandRunner) {
+        this(policyProvider, configParser, commandBuilder, availabilityChecker, commandRunner, new WorkspaceArtifactService());
+    }
+
+    DockerWorkloadExecutor(Supplier<DockerPolicy> policyProvider,
+                           DockerWorkloadConfigParser configParser,
+                           DockerCommandBuilder commandBuilder,
+                           DockerAvailabilityChecker availabilityChecker,
+                           DockerCommandRunner commandRunner,
+                           WorkspacePreparer workspacePreparer) {
         this.policyProvider = Objects.requireNonNull(policyProvider, "policyProvider is required");
         this.configParser = Objects.requireNonNull(configParser, "configParser is required");
         this.commandBuilder = Objects.requireNonNull(commandBuilder, "commandBuilder is required");
         this.availabilityChecker = Objects.requireNonNull(availabilityChecker, "availabilityChecker is required");
         this.commandRunner = Objects.requireNonNull(commandRunner, "commandRunner is required");
+        this.workspacePreparer = Objects.requireNonNull(workspacePreparer, "workspacePreparer is required");
     }
 
     @Override
@@ -79,7 +95,23 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
             return AgentExecutionResult.failed(DOCKER_UNAVAILABLE_FAILURE_CODE, "Docker CLI is unavailable.");
         }
 
-        List<String> command = commandBuilder.build(config);
+        PreparedWorkspace preparedWorkspace;
+        try {
+            preparedWorkspace = prepareWorkspaceIfNeeded(config, payload, context);
+        } catch (MasterClientException exception) {
+            return AgentExecutionResult.failed(
+                    WORKSPACE_ARTIFACT_DOWNLOAD_FAILED_CODE,
+                    shortMessage("Workspace artifact download failed.", exception.getMessage())
+            );
+        } catch (WorkspacePackageInvalidException exception) {
+            return AgentExecutionResult.failed(WORKSPACE_PACKAGE_INVALID_CODE, exception.getMessage());
+        } catch (WorkspaceUnpackException exception) {
+            return AgentExecutionResult.failed(WORKSPACE_UNPACK_FAILED_CODE, exception.getMessage());
+        }
+
+        List<String> command = preparedWorkspace == null
+                ? commandBuilder.build(config)
+                : commandBuilder.build(config, preparedWorkspace.directory());
         DockerCommandResult result;
         try {
             result = commandRunner.run(command, Duration.ofSeconds(config.timeoutSeconds()));
@@ -131,6 +163,19 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
 
     private DockerPolicy currentPolicy() {
         return Objects.requireNonNullElseGet(policyProvider.get(), DockerPolicy::defaultPolicy);
+    }
+
+    private PreparedWorkspace prepareWorkspaceIfNeeded(DockerWorkloadConfig config,
+                                                       ClaimedExecutionPayload payload,
+                                                       AgentExecutionContext context) {
+        if (config.workspace() == null) {
+            return null;
+        }
+        return workspacePreparer.prepare(
+                Objects.requireNonNull(context, "context is required"),
+                payload,
+                config.workspace()
+        );
     }
 
     private static String shortMessage(String prefix, String detail) {

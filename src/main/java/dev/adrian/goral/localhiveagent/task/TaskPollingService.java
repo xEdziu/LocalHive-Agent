@@ -389,7 +389,10 @@ public final class TaskPollingService implements AutoCloseable {
                 payload.executorContractVersion(),
                 payload.executionId()
         );
-        result = executor.execute(payload, new AgentExecutionContext(clock));
+        result = executor.execute(
+                payload,
+                new AgentExecutionContext(clock, config.masterBaseUrl(), config.workerId(), apiKey)
+        );
 
         if (result.success()) {
             log.info(

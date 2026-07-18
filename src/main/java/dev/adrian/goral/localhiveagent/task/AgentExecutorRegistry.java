@@ -28,7 +28,8 @@ public final class AgentExecutorRegistry {
                 new DockerWorkloadConfigParser(),
                 new DockerCommandBuilder(),
                 new DockerCliAvailabilityChecker(),
-                new ProcessDockerCommandRunner()
+                new ProcessDockerCommandRunner(),
+                new WorkspaceArtifactService()
         ));
     }
 

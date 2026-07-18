@@ -9,7 +9,8 @@ public record DockerWorkloadConfig(
         int timeoutSeconds,
         int memoryMb,
         int cpuCores,
-        boolean gpuRequired
+        boolean gpuRequired,
+        DockerWorkspaceConfig workspace
 ) {
 
     public DockerWorkloadConfig {
@@ -29,6 +30,7 @@ public record DockerWorkloadConfig(
                 + ", memoryMb=" + memoryMb
                 + ", cpuCores=" + cpuCores
                 + ", gpuRequired=" + gpuRequired
+                + ", workspace=" + (workspace != null)
                 + ']';
     }
 
