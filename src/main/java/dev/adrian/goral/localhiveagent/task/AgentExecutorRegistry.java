@@ -9,12 +9,19 @@ public final class AgentExecutorRegistry {
 
     public static final String NO_OP_EXECUTOR_ID = "localhive.no-op";
     public static final int NO_OP_CONTRACT_VERSION = 1;
+    public static final String DOCKER_WORKLOAD_EXECUTOR_ID = "localhive.docker.workload";
+    public static final int DOCKER_WORKLOAD_CONTRACT_VERSION = 1;
 
     private final Map<ExecutorKey, AgentExecutor> executors = new ConcurrentHashMap<>();
 
     public static AgentExecutorRegistry withDefaultExecutors() {
         AgentExecutorRegistry registry = new AgentExecutorRegistry();
         registry.register(NO_OP_EXECUTOR_ID, NO_OP_CONTRACT_VERSION, new NoOpAgentExecutor());
+        registry.register(
+                DOCKER_WORKLOAD_EXECUTOR_ID,
+                DOCKER_WORKLOAD_CONTRACT_VERSION,
+                new DockerWorkloadExecutor()
+        );
         return registry;
     }
 

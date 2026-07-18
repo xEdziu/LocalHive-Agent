@@ -20,7 +20,9 @@ import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -41,7 +43,8 @@ public final class TaskPollingService implements AutoCloseable {
     private final CurrentExecutionStore currentExecutionStore;
     private final AgentTaskHistoryStore taskHistoryStore;
     private final AgentStateStore agentStateStore;
-    private final ScheduledExecutorService executor;
+    private final ScheduledExecutorService pollingExecutor;
+    private final ExecutorService executionWorker;
     private final Clock clock;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
@@ -84,6 +87,11 @@ public final class TaskPollingService implements AutoCloseable {
                     thread.setDaemon(true);
                     return thread;
                 }),
+                Executors.newSingleThreadExecutor(runnable -> {
+                    Thread thread = new Thread(runnable, "localhive-task-execution");
+                    thread.setDaemon(true);
+                    return thread;
+                }),
                 Clock.systemDefaultZone()
         );
     }
@@ -95,7 +103,8 @@ public final class TaskPollingService implements AutoCloseable {
                        CurrentExecutionStore currentExecutionStore,
                        AgentTaskHistoryStore taskHistoryStore,
                        AgentStateStore agentStateStore,
-                       ScheduledExecutorService executor,
+                       ScheduledExecutorService pollingExecutor,
+                       ExecutorService executionWorker,
                        Clock clock) {
         this.configService = Objects.requireNonNull(configService);
         this.credentialStore = Objects.requireNonNull(credentialStore);
@@ -104,7 +113,8 @@ public final class TaskPollingService implements AutoCloseable {
         this.currentExecutionStore = Objects.requireNonNull(currentExecutionStore);
         this.taskHistoryStore = Objects.requireNonNull(taskHistoryStore);
         this.agentStateStore = Objects.requireNonNull(agentStateStore);
-        this.executor = Objects.requireNonNull(executor);
+        this.pollingExecutor = Objects.requireNonNull(pollingExecutor);
+        this.executionWorker = Objects.requireNonNull(executionWorker);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -119,7 +129,7 @@ public final class TaskPollingService implements AutoCloseable {
         }
 
         long intervalSeconds = Math.max(1, interval.toSeconds());
-        scheduledTask = executor.scheduleWithFixedDelay(
+        scheduledTask = pollingExecutor.scheduleWithFixedDelay(
                 this::executePollingSafely,
                 0,
                 intervalSeconds,
@@ -157,7 +167,8 @@ public final class TaskPollingService implements AutoCloseable {
     @Override
     public void close() {
         stop();
-        executor.shutdownNow();
+        pollingExecutor.shutdownNow();
+        executionWorker.shutdownNow();
     }
 
     private void executePollingSafely() {
@@ -292,6 +303,57 @@ public final class TaskPollingService implements AutoCloseable {
         }
 
         try {
+            executionWorker.execute(() -> runSupportedExecutionSafely(
+                    config,
+                    apiKey,
+                    payload,
+                    claimed,
+                    executorCandidate.get()
+            ));
+            log.info(
+                    "Execution {} delegated to dedicated worker for executor {}/{}.",
+                    payload.executionId(),
+                    payload.executorId(),
+                    payload.executorContractVersion()
+            );
+        } catch (RejectedExecutionException exception) {
+            keepErrorState(
+                    "Failed to start execution worker: " + exception.getMessage(),
+                    claimed.executionId(),
+                    "Execution worker rejected claimed execution."
+            );
+        }
+    }
+
+    private void runSupportedExecutionSafely(AgentConfig config,
+                                             String apiKey,
+                                             ClaimedExecutionPayload payload,
+                                             CurrentExecution claimed,
+                                             AgentExecutor executor) {
+        try {
+            runSupportedExecution(config, apiKey, payload, claimed, executor);
+        } catch (RuntimeException exception) {
+            log.error(
+                    "Executor execution failed unexpectedly. executionId={} executor={}/{} errorType={}",
+                    payload.executionId(),
+                    payload.executorId(),
+                    payload.executorContractVersion(),
+                    exception.getClass().getSimpleName()
+            );
+            keepErrorState(
+                    "Executor execution failed unexpectedly: " + exception.getMessage(),
+                    claimed.executionId(),
+                    "Executor execution failed unexpectedly. Current execution moved to ERROR."
+            );
+        }
+    }
+
+    private void runSupportedExecution(AgentConfig config,
+                                       String apiKey,
+                                       ClaimedExecutionPayload payload,
+                                       CurrentExecution claimed,
+                                       AgentExecutor executor) {
+        try {
             long reportStartedNanos = System.nanoTime();
             log.info("Reporting RUNNING for execution {}.", claimed.executionId());
             taskClient.reportRunning(
@@ -327,18 +389,7 @@ public final class TaskPollingService implements AutoCloseable {
                 payload.executorContractVersion(),
                 payload.executionId()
         );
-        try {
-            result = executorCandidate.get().execute(payload, new AgentExecutionContext(clock));
-        } catch (RuntimeException exception) {
-            log.error(
-                    "Executor execution failed unexpectedly. executionId={} executor={}/{} errorType={}",
-                    payload.executionId(),
-                    payload.executorId(),
-                    payload.executorContractVersion(),
-                    exception.getClass().getSimpleName()
-            );
-            throw exception;
-        }
+        result = executor.execute(payload, new AgentExecutionContext(clock));
 
         if (result.success()) {
             log.info(

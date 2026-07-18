@@ -20,6 +20,16 @@ class AgentExecutorRegistryTest {
     }
 
     @Test
+    void shouldContainDefaultDockerWorkloadExecutor() {
+        AgentExecutorRegistry registry = AgentExecutorRegistry.withDefaultExecutors();
+
+        assertTrue(registry.findExecutor(
+                AgentExecutorRegistry.DOCKER_WORKLOAD_EXECUTOR_ID,
+                AgentExecutorRegistry.DOCKER_WORKLOAD_CONTRACT_VERSION
+        ).isPresent());
+    }
+
+    @Test
     void shouldResolveExecutorsByIdentifierAndContractVersion() {
         AgentExecutorRegistry registry = new AgentExecutorRegistry();
         AgentExecutor executor = (payload, context) -> AgentExecutionResult.succeeded();

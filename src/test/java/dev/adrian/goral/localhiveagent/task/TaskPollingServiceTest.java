@@ -27,6 +27,7 @@ import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Delayed;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -325,6 +326,29 @@ class TaskPollingServiceTest {
         assertEquals(0, fixture.taskClient.claimCalls);
     }
 
+    @Test
+    void shouldDelegateExecutionToDedicatedWorkerAndAvoidSecondClaimWhileActive() {
+        ManualExecutorService executionWorker = new ManualExecutorService();
+        TestFixture fixture = createFixture(false, true, AgentExecutorRegistry.withDefaultExecutors(), executionWorker);
+        fixture.taskClient.nextClaim = Optional.of(noOpPayload(NOW.plusMinutes(1)));
+
+        fixture.startAndRunOnce();
+
+        assertEquals(1, fixture.taskClient.claimCalls);
+        assertEquals(1, executionWorker.pendingCommands());
+        assertTrue(fixture.taskClient.reports.isEmpty());
+        assertEquals(CurrentExecutionStatus.CLAIMED, fixture.currentExecutionStore.currentExecution().orElseThrow().status());
+
+        fixture.service.runPollingOnce();
+
+        assertEquals(1, fixture.taskClient.claimCalls);
+
+        executionWorker.runNext();
+
+        assertEquals(List.of("RUNNING", "SUCCEEDED"), fixture.taskClient.reports);
+        assertTrue(fixture.currentExecutionStore.currentExecution().isEmpty());
+    }
+
     private TestFixture createFixture(boolean paused, boolean apiKeyPresent, AgentExecutorRegistry registry) {
         return createFixture(new AgentConfig(
                 "http://localhost:8080",
@@ -352,10 +376,32 @@ class TaskPollingServiceTest {
         return createFixture(config, apiKeyPresent, registry, taskHistoryStore);
     }
 
+    private TestFixture createFixture(boolean paused,
+                                      boolean apiKeyPresent,
+                                      AgentExecutorRegistry registry,
+                                      ExecutorService executionWorker) {
+        AgentTaskHistoryStore taskHistoryStore = new AgentTaskHistoryStore(tempDir.resolve("task-history.sqlite"));
+        taskHistoryStore.initialize();
+        return createFixture(new AgentConfig(
+                "http://localhost:8080",
+                WORKER_ID,
+                4096,
+                paused
+        ), apiKeyPresent, registry, taskHistoryStore, executionWorker);
+    }
+
     private TestFixture createFixture(AgentConfig config,
                                       boolean apiKeyPresent,
                                       AgentExecutorRegistry registry,
                                       AgentTaskHistoryStore taskHistoryStore) {
+        return createFixture(config, apiKeyPresent, registry, taskHistoryStore, new DirectExecutorService());
+    }
+
+    private TestFixture createFixture(AgentConfig config,
+                                      boolean apiKeyPresent,
+                                      AgentExecutorRegistry registry,
+                                      AgentTaskHistoryStore taskHistoryStore,
+                                      ExecutorService executionWorker) {
         ConfigService configService = new ConfigService(tempDir.resolve("config.json"));
         configService.save(config);
 
@@ -372,6 +418,7 @@ class TaskPollingServiceTest {
                 taskHistoryStore,
                 agentStateStore,
                 executor,
+                executionWorker,
                 CLOCK
         );
 
@@ -629,6 +676,89 @@ class TaskPollingServiceTest {
                 TimeUnit unit
         ) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class DirectExecutorService extends AbstractExecutorService {
+
+        private boolean shutdown;
+
+        @Override
+        public void shutdown() {
+            shutdown = true;
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            shutdown = true;
+            return List.of();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) {
+            return shutdown;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            command.run();
+        }
+    }
+
+    private static final class ManualExecutorService extends AbstractExecutorService {
+
+        private final List<Runnable> commands = new ArrayList<>();
+        private boolean shutdown;
+
+        @Override
+        public void shutdown() {
+            shutdown = true;
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            shutdown = true;
+            List<Runnable> pending = List.copyOf(commands);
+            commands.clear();
+            return pending;
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) {
+            return shutdown;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            commands.add(command);
+        }
+
+        private int pendingCommands() {
+            return commands.size();
+        }
+
+        private void runNext() {
+            commands.removeFirst().run();
         }
     }
 
