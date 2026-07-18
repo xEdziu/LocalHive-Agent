@@ -13,6 +13,8 @@ import dev.adrian.goral.localhiveagent.security.CredentialStoreFactory;
 import dev.adrian.goral.localhiveagent.task.AgentExecutorRegistry;
 import dev.adrian.goral.localhiveagent.task.CurrentExecutionStore;
 import dev.adrian.goral.localhiveagent.task.TaskPollingService;
+import dev.adrian.goral.localhiveagent.task.history.AgentTaskHistoryEntry;
+import dev.adrian.goral.localhiveagent.task.history.AgentTaskHistoryStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -103,12 +105,15 @@ public final class AgentRuntime implements AutoCloseable {
         );
 
         CurrentExecutionStore currentExecutionStore = new CurrentExecutionStore();
+        AgentTaskHistoryStore taskHistoryStore = new AgentTaskHistoryStore(AgentPaths.taskHistoryPath());
+        initializeTaskHistory(taskHistoryStore, agentStateStore);
         TaskPollingService taskPollingService = new TaskPollingService(
                 configService,
                 credentialStore,
                 taskClient,
                 AgentExecutorRegistry.withDefaultExecutors(),
                 currentExecutionStore,
+                taskHistoryStore,
                 agentStateStore
         );
 
@@ -176,6 +181,21 @@ public final class AgentRuntime implements AutoCloseable {
 
     public AgentStateStore agentStateStore() {
         return agentStateStore;
+    }
+
+    private static void initializeTaskHistory(AgentTaskHistoryStore taskHistoryStore,
+                                              AgentStateStore agentStateStore) {
+        try {
+            taskHistoryStore.initialize();
+            long count = taskHistoryStore.count();
+            String latestSummary = taskHistoryStore.findLatest(1).stream()
+                    .findFirst()
+                    .map(AgentTaskHistoryEntry::summary)
+                    .orElse("none");
+            agentStateStore.setTaskHistory(count, latestSummary);
+        } catch (RuntimeException exception) {
+            log.warn("Task history initialization failed: {}", exception.getMessage());
+        }
     }
 
     @Override

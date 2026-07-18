@@ -15,16 +15,23 @@ public record AgentStateSnapshot(
         boolean workerRegistered,
         boolean workerApiReady,
         boolean taskPollingEnabled,
-        String currentExecutionSummary
+        String currentExecutionSummary,
+        long taskHistoryCount,
+        String latestTaskHistorySummary
 ) {
 
     public AgentStateSnapshot {
         Objects.requireNonNull(masterConnectionState, "masterConnectionState is required");
         Objects.requireNonNull(workerMode, "workerMode is required");
         Objects.requireNonNull(heartbeatState, "heartbeatState is required");
+        if (taskHistoryCount < 0) {
+            throw new IllegalArgumentException("taskHistoryCount cannot be negative.");
+        }
+
         lastMessage = normalize(lastMessage);
         lastError = normalize(lastError);
         currentExecutionSummary = normalizeCurrentExecutionSummary(currentExecutionSummary);
+        latestTaskHistorySummary = normalizeCurrentExecutionSummary(latestTaskHistorySummary);
     }
 
     public static AgentStateSnapshot initial(AgentConfig config, boolean workerApiReady, boolean heartbeatRunning) {
@@ -40,6 +47,8 @@ public record AgentStateSnapshot(
                 config.hasWorkerId(),
                 workerApiReady,
                 false,
+                "none",
+                0,
                 "none"
         );
     }
@@ -47,7 +56,7 @@ public record AgentStateSnapshot(
     public AgentStateSnapshot withConfiguration(AgentConfig config, boolean nextWorkerApiReady) {
         Objects.requireNonNull(config, "config is required");
 
-        return new AgentStateSnapshot(
+        return copy(
                 resolveMasterConnectionState(config),
                 WorkerMode.fromPauseEnabled(config.pauseEnabled()),
                 heartbeatState,
@@ -57,12 +66,14 @@ public record AgentStateSnapshot(
                 config.hasWorkerId(),
                 nextWorkerApiReady,
                 taskPollingEnabled,
-                currentExecutionSummary
+                currentExecutionSummary,
+                taskHistoryCount,
+                latestTaskHistorySummary
         );
     }
 
     public AgentStateSnapshot withMasterConnectionState(MasterConnectionState nextState) {
-        return new AgentStateSnapshot(
+        return copy(
                 nextState,
                 workerMode,
                 heartbeatState,
@@ -72,12 +83,14 @@ public record AgentStateSnapshot(
                 workerRegistered,
                 workerApiReady,
                 taskPollingEnabled,
-                currentExecutionSummary
+                currentExecutionSummary,
+                taskHistoryCount,
+                latestTaskHistorySummary
         );
     }
 
     public AgentStateSnapshot withWorkerMode(WorkerMode nextWorkerMode) {
-        return new AgentStateSnapshot(
+        return copy(
                 masterConnectionState,
                 nextWorkerMode,
                 heartbeatState,
@@ -87,12 +100,14 @@ public record AgentStateSnapshot(
                 workerRegistered,
                 workerApiReady,
                 taskPollingEnabled,
-                currentExecutionSummary
+                currentExecutionSummary,
+                taskHistoryCount,
+                latestTaskHistorySummary
         );
     }
 
     public AgentStateSnapshot withHeartbeatState(HeartbeatState nextHeartbeatState) {
-        return new AgentStateSnapshot(
+        return copy(
                 masterConnectionState,
                 workerMode,
                 nextHeartbeatState,
@@ -102,12 +117,14 @@ public record AgentStateSnapshot(
                 workerRegistered,
                 workerApiReady,
                 taskPollingEnabled,
-                currentExecutionSummary
+                currentExecutionSummary,
+                taskHistoryCount,
+                latestTaskHistorySummary
         );
     }
 
     public AgentStateSnapshot withLastMessage(String nextLastMessage) {
-        return new AgentStateSnapshot(
+        return copy(
                 masterConnectionState,
                 workerMode,
                 heartbeatState,
@@ -117,12 +134,14 @@ public record AgentStateSnapshot(
                 workerRegistered,
                 workerApiReady,
                 taskPollingEnabled,
-                currentExecutionSummary
+                currentExecutionSummary,
+                taskHistoryCount,
+                latestTaskHistorySummary
         );
     }
 
     public AgentStateSnapshot withLastError(String nextLastError) {
-        return new AgentStateSnapshot(
+        return copy(
                 masterConnectionState,
                 workerMode,
                 heartbeatState,
@@ -132,12 +151,14 @@ public record AgentStateSnapshot(
                 workerRegistered,
                 workerApiReady,
                 taskPollingEnabled,
-                currentExecutionSummary
+                currentExecutionSummary,
+                taskHistoryCount,
+                latestTaskHistorySummary
         );
     }
 
     public AgentStateSnapshot withSuccessfulHeartbeat(Instant timestamp, String message) {
-        return new AgentStateSnapshot(
+        return copy(
                 MasterConnectionState.CONNECTED,
                 workerMode,
                 HeartbeatState.RUNNING,
@@ -147,12 +168,14 @@ public record AgentStateSnapshot(
                 workerRegistered,
                 workerApiReady,
                 taskPollingEnabled,
-                currentExecutionSummary
+                currentExecutionSummary,
+                taskHistoryCount,
+                latestTaskHistorySummary
         );
     }
 
     public AgentStateSnapshot withHeartbeatFailure(String error) {
-        return new AgentStateSnapshot(
+        return copy(
                 MasterConnectionState.ATTENTION_REQUIRED,
                 workerMode,
                 HeartbeatState.FAILED,
@@ -162,7 +185,9 @@ public record AgentStateSnapshot(
                 workerRegistered,
                 workerApiReady,
                 taskPollingEnabled,
-                currentExecutionSummary
+                currentExecutionSummary,
+                taskHistoryCount,
+                latestTaskHistorySummary
         );
     }
 
@@ -171,7 +196,7 @@ public record AgentStateSnapshot(
     }
 
     public AgentStateSnapshot withTaskPollingEnabled(boolean nextTaskPollingEnabled) {
-        return new AgentStateSnapshot(
+        return copy(
                 masterConnectionState,
                 workerMode,
                 heartbeatState,
@@ -181,12 +206,14 @@ public record AgentStateSnapshot(
                 workerRegistered,
                 workerApiReady,
                 nextTaskPollingEnabled,
-                currentExecutionSummary
+                currentExecutionSummary,
+                taskHistoryCount,
+                latestTaskHistorySummary
         );
     }
 
     public AgentStateSnapshot withCurrentExecutionSummary(String nextCurrentExecutionSummary) {
-        return new AgentStateSnapshot(
+        return copy(
                 masterConnectionState,
                 workerMode,
                 heartbeatState,
@@ -196,7 +223,54 @@ public record AgentStateSnapshot(
                 workerRegistered,
                 workerApiReady,
                 taskPollingEnabled,
-                nextCurrentExecutionSummary
+                nextCurrentExecutionSummary,
+                taskHistoryCount,
+                latestTaskHistorySummary
+        );
+    }
+
+    public AgentStateSnapshot withTaskHistory(long nextTaskHistoryCount, String nextLatestTaskHistorySummary) {
+        return copy(
+                masterConnectionState,
+                workerMode,
+                heartbeatState,
+                lastSuccessfulHeartbeat,
+                lastMessage,
+                lastError,
+                workerRegistered,
+                workerApiReady,
+                taskPollingEnabled,
+                currentExecutionSummary,
+                nextTaskHistoryCount,
+                nextLatestTaskHistorySummary
+        );
+    }
+
+    private AgentStateSnapshot copy(MasterConnectionState nextMasterConnectionState,
+                                    WorkerMode nextWorkerMode,
+                                    HeartbeatState nextHeartbeatState,
+                                    Instant nextLastSuccessfulHeartbeat,
+                                    String nextLastMessage,
+                                    String nextLastError,
+                                    boolean nextWorkerRegistered,
+                                    boolean nextWorkerApiReady,
+                                    boolean nextTaskPollingEnabled,
+                                    String nextCurrentExecutionSummary,
+                                    long nextTaskHistoryCount,
+                                    String nextLatestTaskHistorySummary) {
+        return new AgentStateSnapshot(
+                nextMasterConnectionState,
+                nextWorkerMode,
+                nextHeartbeatState,
+                nextLastSuccessfulHeartbeat,
+                nextLastMessage,
+                nextLastError,
+                nextWorkerRegistered,
+                nextWorkerApiReady,
+                nextTaskPollingEnabled,
+                nextCurrentExecutionSummary,
+                nextTaskHistoryCount,
+                nextLatestTaskHistorySummary
         );
     }
 

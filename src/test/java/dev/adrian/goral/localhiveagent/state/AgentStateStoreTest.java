@@ -34,6 +34,8 @@ class AgentStateStoreTest {
         assertEquals("", snapshot.lastError());
         assertFalse(snapshot.workerRegistered());
         assertFalse(snapshot.workerApiReady());
+        assertEquals(0, snapshot.taskHistoryCount());
+        assertEquals("none", snapshot.latestTaskHistorySummary());
     }
 
     @Test
@@ -93,6 +95,16 @@ class AgentStateStoreTest {
         store.setLastMessage("Config saved.");
 
         assertEquals("Config saved.", receivedSnapshot.get().lastMessage());
+    }
+
+    @Test
+    void updatesTaskHistoryState() {
+        AgentStateStore store = AgentStateStore.fromConfig(AgentConfig.empty(), false, false);
+
+        store.setTaskHistory(12, "localhive.no-op / SUCCEEDED / 123 ms");
+
+        assertEquals(12, store.snapshot().taskHistoryCount());
+        assertEquals("localhive.no-op / SUCCEEDED / 123 ms", store.snapshot().latestTaskHistorySummary());
     }
 
     @Test

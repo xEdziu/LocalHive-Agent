@@ -5,6 +5,7 @@ module dev.adrian.goral.localhiveagent {
 
     requires java.desktop;
     requires java.net.http;
+    requires java.sql;
 
     requires com.github.oshi;
     requires org.slf4j;

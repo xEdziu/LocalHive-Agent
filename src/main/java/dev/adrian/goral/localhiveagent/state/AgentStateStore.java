@@ -89,6 +89,10 @@ public final class AgentStateStore implements AutoCloseable {
         update(current -> current.withCurrentExecutionSummary(summary));
     }
 
+    public void setTaskHistory(long count, String latestSummary) {
+        update(current -> current.withTaskHistory(count, latestSummary));
+    }
+
     public void recordSuccessfulHeartbeat(Instant timestamp, String message) {
         update(current -> current.withSuccessfulHeartbeat(timestamp, message));
     }

@@ -7,6 +7,9 @@ import dev.adrian.goral.localhiveagent.master.MasterTaskClient;
 import dev.adrian.goral.localhiveagent.master.dto.ClaimedExecutionPayload;
 import dev.adrian.goral.localhiveagent.security.CredentialStore;
 import dev.adrian.goral.localhiveagent.state.AgentStateStore;
+import dev.adrian.goral.localhiveagent.task.history.AgentTaskHistoryEntry;
+import dev.adrian.goral.localhiveagent.task.history.AgentTaskHistoryStatus;
+import dev.adrian.goral.localhiveagent.task.history.AgentTaskHistoryStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -68,6 +71,7 @@ class TaskPollingServiceTest {
 
         assertEquals(0, fixture.taskClient.claimCalls);
         assertTrue(fixture.currentExecutionStore.currentExecution().isEmpty());
+        assertEquals(0, fixture.taskHistoryStore.count());
     }
 
     @Test
@@ -114,6 +118,7 @@ class TaskPollingServiceTest {
         assertEquals(1, fixture.taskClient.claimCalls);
         assertTrue(fixture.currentExecutionStore.currentExecution().isEmpty());
         assertEquals("none", fixture.agentStateStore.snapshot().currentExecutionSummary());
+        assertEquals(0, fixture.taskHistoryStore.count());
     }
 
     @Test
@@ -127,6 +132,10 @@ class TaskPollingServiceTest {
         assertEquals(List.of("RUNNING", "SUCCEEDED"), fixture.taskClient.reports);
         assertTrue(fixture.currentExecutionStore.currentExecution().isEmpty());
         assertEquals("none", fixture.agentStateStore.snapshot().currentExecutionSummary());
+        AgentTaskHistoryEntry history = fixture.taskHistoryStore.findByExecutionId(EXECUTION_ID).orElseThrow();
+        assertEquals(AgentTaskHistoryStatus.SUCCEEDED, history.status());
+        assertEquals(1, fixture.agentStateStore.snapshot().taskHistoryCount());
+        assertTrue(fixture.agentStateStore.snapshot().latestTaskHistorySummary().contains("SUCCEEDED"));
     }
 
     @Test
@@ -139,6 +148,9 @@ class TaskPollingServiceTest {
         assertEquals(List.of("FAILED"), fixture.taskClient.reports);
         assertEquals(TaskPollingService.UNSUPPORTED_EXECUTOR_FAILURE_CODE, fixture.taskClient.failureCode);
         assertTrue(fixture.currentExecutionStore.currentExecution().isEmpty());
+        AgentTaskHistoryEntry history = fixture.taskHistoryStore.findByExecutionId(EXECUTION_ID).orElseThrow();
+        assertEquals(AgentTaskHistoryStatus.FAILED, history.status());
+        assertEquals(TaskPollingService.UNSUPPORTED_EXECUTOR_FAILURE_CODE, history.failureCode());
     }
 
     @Test
@@ -191,6 +203,9 @@ class TaskPollingServiceTest {
         assertEquals(CurrentExecutionStatus.ERROR, execution.status());
         assertTrue(execution.lastError().contains("Failed to report execution RUNNING"));
         assertFalse(execution.toString().contains(LEASE_TOKEN));
+        AgentTaskHistoryEntry history = fixture.taskHistoryStore.findByExecutionId(EXECUTION_ID).orElseThrow();
+        assertEquals(AgentTaskHistoryStatus.ERROR, history.status());
+        assertTrue(history.lastError().contains("Failed to report execution RUNNING"));
     }
 
     @Test
@@ -204,6 +219,9 @@ class TaskPollingServiceTest {
         CurrentExecution execution = fixture.currentExecutionStore.currentExecution().orElseThrow();
         assertEquals(CurrentExecutionStatus.ERROR, execution.status());
         assertTrue(execution.lastError().contains("Failed to report execution SUCCEEDED"));
+        AgentTaskHistoryEntry history = fixture.taskHistoryStore.findByExecutionId(EXECUTION_ID).orElseThrow();
+        assertEquals(AgentTaskHistoryStatus.ERROR, history.status());
+        assertTrue(history.lastError().contains("Failed to report execution SUCCEEDED"));
     }
 
     @Test
@@ -242,6 +260,22 @@ class TaskPollingServiceTest {
 
         assertEquals(0, fixture.taskClient.renewCalls);
         assertEquals(0, fixture.taskClient.claimCalls);
+    }
+
+    @Test
+    void shouldContinueTaskPipelineWhenHistoryStoreFails() {
+        TestFixture fixture = createFixture(
+                false,
+                true,
+                AgentExecutorRegistry.withDefaultExecutors(),
+                new FailingTaskHistoryStore(tempDir.resolve("failing-history.sqlite"))
+        );
+        fixture.taskClient.nextClaim = Optional.of(noOpPayload(NOW.plusMinutes(1)));
+
+        fixture.startAndRunOnce();
+
+        assertEquals(List.of("RUNNING", "SUCCEEDED"), fixture.taskClient.reports);
+        assertTrue(fixture.currentExecutionStore.currentExecution().isEmpty());
     }
 
     @Test
@@ -300,7 +334,28 @@ class TaskPollingServiceTest {
         ), apiKeyPresent, registry);
     }
 
+    private TestFixture createFixture(boolean paused,
+                                      boolean apiKeyPresent,
+                                      AgentExecutorRegistry registry,
+                                      AgentTaskHistoryStore taskHistoryStore) {
+        return createFixture(new AgentConfig(
+                "http://localhost:8080",
+                WORKER_ID,
+                4096,
+                paused
+        ), apiKeyPresent, registry, taskHistoryStore);
+    }
+
     private TestFixture createFixture(AgentConfig config, boolean apiKeyPresent, AgentExecutorRegistry registry) {
+        AgentTaskHistoryStore taskHistoryStore = new AgentTaskHistoryStore(tempDir.resolve("task-history.sqlite"));
+        taskHistoryStore.initialize();
+        return createFixture(config, apiKeyPresent, registry, taskHistoryStore);
+    }
+
+    private TestFixture createFixture(AgentConfig config,
+                                      boolean apiKeyPresent,
+                                      AgentExecutorRegistry registry,
+                                      AgentTaskHistoryStore taskHistoryStore) {
         ConfigService configService = new ConfigService(tempDir.resolve("config.json"));
         configService.save(config);
 
@@ -314,12 +369,13 @@ class TaskPollingServiceTest {
                 taskClient,
                 registry,
                 currentExecutionStore,
+                taskHistoryStore,
                 agentStateStore,
                 executor,
                 CLOCK
         );
 
-        return new TestFixture(service, taskClient, currentExecutionStore, agentStateStore, executor);
+        return new TestFixture(service, taskClient, currentExecutionStore, taskHistoryStore, agentStateStore, executor);
     }
 
     private static ClaimedExecutionPayload noOpPayload(LocalDateTime leaseExpiresAt) {
@@ -348,6 +404,7 @@ class TaskPollingServiceTest {
             TaskPollingService service,
             FakeMasterTaskClient taskClient,
             CurrentExecutionStore currentExecutionStore,
+            AgentTaskHistoryStore taskHistoryStore,
             AgentStateStore agentStateStore,
             RecordingScheduledExecutorService executor
     ) {
@@ -355,6 +412,45 @@ class TaskPollingServiceTest {
         private void startAndRunOnce() {
             service.start(TaskPollingService.DEFAULT_POLLING_INTERVAL);
             service.runPollingOnce();
+        }
+    }
+
+    private static final class FailingTaskHistoryStore extends AgentTaskHistoryStore {
+
+        private FailingTaskHistoryStore(Path databasePath) {
+            super(databasePath);
+        }
+
+        @Override
+        public void initialize() {
+        }
+
+        @Override
+        public void recordClaimed(UUID executionId,
+                                  String executorId,
+                                  int executorContractVersion,
+                                  Instant claimedAt) {
+            throw new IllegalStateException("history unavailable");
+        }
+
+        @Override
+        public void recordRunning(UUID executionId, Instant startedAt) {
+            throw new IllegalStateException("history unavailable");
+        }
+
+        @Override
+        public void recordSucceeded(UUID executionId, Instant completedAt) {
+            throw new IllegalStateException("history unavailable");
+        }
+
+        @Override
+        public List<AgentTaskHistoryEntry> findLatest(int limit) {
+            throw new IllegalStateException("history unavailable");
+        }
+
+        @Override
+        public long count() {
+            throw new IllegalStateException("history unavailable");
         }
     }
 

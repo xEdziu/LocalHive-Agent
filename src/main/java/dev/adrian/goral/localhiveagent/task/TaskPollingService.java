@@ -1,5 +1,6 @@
 package dev.adrian.goral.localhiveagent.task;
 
+import dev.adrian.goral.localhiveagent.app.AgentPaths;
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
 import dev.adrian.goral.localhiveagent.config.ConfigService;
 import dev.adrian.goral.localhiveagent.master.MasterClientException;
@@ -7,6 +8,8 @@ import dev.adrian.goral.localhiveagent.master.MasterTaskClient;
 import dev.adrian.goral.localhiveagent.master.dto.ClaimedExecutionPayload;
 import dev.adrian.goral.localhiveagent.security.CredentialStore;
 import dev.adrian.goral.localhiveagent.state.AgentStateStore;
+import dev.adrian.goral.localhiveagent.task.history.AgentTaskHistoryEntry;
+import dev.adrian.goral.localhiveagent.task.history.AgentTaskHistoryStore;
 import dev.adrian.goral.localhiveagent.validation.AgentConfigValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +39,7 @@ public final class TaskPollingService implements AutoCloseable {
     private final MasterTaskClient taskClient;
     private final AgentExecutorRegistry executorRegistry;
     private final CurrentExecutionStore currentExecutionStore;
+    private final AgentTaskHistoryStore taskHistoryStore;
     private final AgentStateStore agentStateStore;
     private final ScheduledExecutorService executor;
     private final Clock clock;
@@ -55,6 +59,25 @@ public final class TaskPollingService implements AutoCloseable {
                 taskClient,
                 executorRegistry,
                 currentExecutionStore,
+                new AgentTaskHistoryStore(AgentPaths.taskHistoryPath()),
+                agentStateStore
+        );
+    }
+
+    public TaskPollingService(ConfigService configService,
+                              CredentialStore credentialStore,
+                              MasterTaskClient taskClient,
+                              AgentExecutorRegistry executorRegistry,
+                              CurrentExecutionStore currentExecutionStore,
+                              AgentTaskHistoryStore taskHistoryStore,
+                              AgentStateStore agentStateStore) {
+        this(
+                configService,
+                credentialStore,
+                taskClient,
+                executorRegistry,
+                currentExecutionStore,
+                taskHistoryStore,
                 agentStateStore,
                 Executors.newSingleThreadScheduledExecutor(runnable -> {
                     Thread thread = new Thread(runnable, "localhive-task-polling");
@@ -70,6 +93,7 @@ public final class TaskPollingService implements AutoCloseable {
                        MasterTaskClient taskClient,
                        AgentExecutorRegistry executorRegistry,
                        CurrentExecutionStore currentExecutionStore,
+                       AgentTaskHistoryStore taskHistoryStore,
                        AgentStateStore agentStateStore,
                        ScheduledExecutorService executor,
                        Clock clock) {
@@ -78,6 +102,7 @@ public final class TaskPollingService implements AutoCloseable {
         this.taskClient = Objects.requireNonNull(taskClient);
         this.executorRegistry = Objects.requireNonNull(executorRegistry);
         this.currentExecutionStore = Objects.requireNonNull(currentExecutionStore);
+        this.taskHistoryStore = Objects.requireNonNull(taskHistoryStore);
         this.agentStateStore = Objects.requireNonNull(agentStateStore);
         this.executor = Objects.requireNonNull(executor);
         this.clock = Objects.requireNonNull(clock);
@@ -102,6 +127,7 @@ public final class TaskPollingService implements AutoCloseable {
         );
         agentStateStore.setTaskPollingEnabled(true);
         publishCurrentExecutionSummary();
+        publishTaskHistorySummary();
         log.info("Task polling started. Interval: {}s", intervalSeconds);
     }
 
@@ -228,6 +254,13 @@ public final class TaskPollingService implements AutoCloseable {
     private void executeClaimedPayload(AgentConfig config, String apiKey, ClaimedExecutionPayload payload) {
         CurrentExecution claimed = currentExecutionStore.setClaimed(payload);
         publishCurrentExecutionSummary();
+        recordTaskHistory("record claimed execution", () ->
+                taskHistoryStore.recordClaimed(
+                        payload.executionId(),
+                        payload.executorId(),
+                        payload.executorContractVersion(),
+                        clock.instant()
+                ));
         log.info(
                 "Claimed execution {} executor={}/{} leaseExpiresAt={}",
                 claimed.executionId(),
@@ -270,6 +303,8 @@ public final class TaskPollingService implements AutoCloseable {
             );
             currentExecutionStore.markRunning();
             publishCurrentExecutionSummary();
+            recordTaskHistory("record running execution", () ->
+                    taskHistoryStore.recordRunning(claimed.executionId(), clock.instant()));
             log.info(
                     "Execution {} reported RUNNING. durationMs={}",
                     claimed.executionId(),
@@ -349,6 +384,8 @@ public final class TaskPollingService implements AutoCloseable {
                     execution.executionId(),
                     elapsedMillis(reportStartedNanos)
             );
+            recordTaskHistory("record succeeded execution", () ->
+                    taskHistoryStore.recordSucceeded(execution.executionId(), clock.instant()));
             currentExecutionStore.markSucceeded();
             currentExecutionStore.clear();
             publishCurrentExecutionSummary();
@@ -388,6 +425,13 @@ public final class TaskPollingService implements AutoCloseable {
                     execution.executionId(),
                     elapsedMillis(reportStartedNanos)
             );
+            recordTaskHistory("record failed execution", () ->
+                    taskHistoryStore.recordFailed(
+                            execution.executionId(),
+                            failureCode,
+                            failureMessage,
+                            clock.instant()
+                    ));
             currentExecutionStore.markFailed();
             currentExecutionStore.clear();
             publishCurrentExecutionSummary();
@@ -404,12 +448,36 @@ public final class TaskPollingService implements AutoCloseable {
     private void keepErrorState(String error, UUID executionId, String logMessage) {
         currentExecutionStore.markError(error);
         publishCurrentExecutionSummary();
+        recordTaskHistory("record error execution", () ->
+                taskHistoryStore.recordError(executionId, error, clock.instant()));
         agentStateStore.setLastError(error);
         log.error("{} executionId={} reason={}", logMessage, executionId, error);
     }
 
     private void publishCurrentExecutionSummary() {
         agentStateStore.setCurrentExecutionSummary(currentExecutionStore.summary());
+    }
+
+    private void recordTaskHistory(String action, Runnable recorder) {
+        try {
+            recorder.run();
+            publishTaskHistorySummary();
+        } catch (RuntimeException exception) {
+            log.warn("Task history write failed during {}: {}", action, exception.getMessage());
+        }
+    }
+
+    private void publishTaskHistorySummary() {
+        try {
+            long count = taskHistoryStore.count();
+            String latestSummary = taskHistoryStore.findLatest(1).stream()
+                    .findFirst()
+                    .map(AgentTaskHistoryEntry::summary)
+                    .orElse("none");
+            agentStateStore.setTaskHistory(count, latestSummary);
+        } catch (RuntimeException exception) {
+            log.warn("Task history summary refresh failed: {}", exception.getMessage());
+        }
     }
 
     private static boolean shouldRenew(CurrentExecution execution, LocalDateTime now) {

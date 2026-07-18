@@ -138,7 +138,12 @@ public class AgentMainView {
         applyWorkerMode(snapshot);
         applyHeartbeatState(snapshot.heartbeatState());
         applyLastHeartbeat(snapshot);
-        agentStatePane.refreshTaskState(snapshot.taskPollingEnabled(), snapshot.currentExecutionSummary());
+        agentStatePane.refreshTaskState(
+                snapshot.taskPollingEnabled(),
+                snapshot.currentExecutionSummary(),
+                snapshot.taskHistoryCount(),
+                snapshot.latestTaskHistorySummary()
+        );
         applyLastMessage(snapshot);
     }
 
