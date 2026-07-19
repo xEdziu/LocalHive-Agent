@@ -262,4 +262,6 @@ Rules:
 
 The current Task Protocol support is limited to registered Agent executors such as NO_OP and constrained Docker workload execution. Docker execution is governed by local Agent policy; see [docker-policy.md](docker-policy.md).
 
-Broader workload types, Minecraft workload execution, RCON, native packaging, workspace packages, artifact handling, GPU execution, and current workload display remain future work.
+Docker workloads may optionally download a Master-provided workspace package, unpack it under the Agent workspace directory, and mount it read-only at `/workspace`; see [workspace-artifacts.md](workspace-artifacts.md).
+
+Broader workload types, Minecraft workload execution, RCON, native packaging, output artifact handling, GPU execution, and current workload display remain future work.

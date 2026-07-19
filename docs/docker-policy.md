@@ -36,22 +36,30 @@ Current V1 constraints:
 
 - Only exact allowed images are accepted.
 - Docker command is built as an argument list.
-- The Agent uses fixed Docker flags:
+- The Agent uses fixed Docker flags.
 
 ```text
 docker run --rm --network none --memory <memoryMb>m --cpus <cpuCores> <image> <command...>
 ```
 
+When a workspace artifact is configured, the Agent adds one generated read-only bind mount:
+
+```text
+--mount type=bind,source=<agent-workspace-directory>,target=/workspace,readonly
+```
+
+See [workspace-artifacts.md](workspace-artifacts.md) for the current workspace artifact flow and limits.
+
 The current implementation does not support:
 
-- Host mounts.
+- User-configured host mounts.
+- Writable workspace mounts.
 - `docker.sock` mounts.
 - Privileged mode.
 - Host network.
 - Custom environment variables.
 - GPU flags.
-- Workspace packages.
-- Artifacts.
+- Output artifacts.
 - YAML import.
 - Distributed or sharded execution.
 
@@ -65,6 +73,9 @@ The current implementation does not support:
 | `DOCKER_UNAVAILABLE` | Docker CLI is not available on the Agent machine. |
 | `DOCKER_WORKLOAD_TIMEOUT` | The container exceeded `timeoutSeconds`. |
 | `DOCKER_WORKLOAD_FAILED` | The container exited with a non-zero exit code or failed to start. |
+| `WORKSPACE_ARTIFACT_DOWNLOAD_FAILED` | The workspace artifact could not be downloaded from the Master. |
+| `WORKSPACE_PACKAGE_INVALID` | The downloaded workspace ZIP is invalid or violates package safety limits. |
+| `WORKSPACE_UNPACK_FAILED` | The Agent could not safely prepare or unpack the local workspace directory. |
 
 ## Future Extensions
 

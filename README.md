@@ -120,9 +120,10 @@ The API key is not stored in `config.json`. It is stored through the selected `C
 
 ### Docker Policy
 
-Docker policy is a local Agent security policy. The Master can assign a Docker workload, but the Agent runs it only when the local policy allows the requested image and resources.
+Docker policy is a local Agent security policy. The Master can assign a Docker workload, but the Agent runs it only when the local policy allows the requested image and resources. Docker workloads may optionally mount a small read-only workspace artifact at `/workspace`.
 
 See [docs/docker-policy.md](docs/docker-policy.md) for the current Docker workload V1 limits, failure codes, and future extension path.
+See [docs/workspace-artifacts.md](docs/workspace-artifacts.md) for the current workspace artifact flow.
 
 ## Credential Storage
 
@@ -193,6 +194,7 @@ CI uses Temurin 21, Maven cache, and uploads Surefire reports only on failure.
 
 - [Architecture](docs/architecture.md)
 - [Docker Policy](docs/docker-policy.md)
+- [Workspace Artifacts](docs/workspace-artifacts.md)
 - [Security](docs/security.md)
 - [Development](docs/development.md)
 

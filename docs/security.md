@@ -12,6 +12,7 @@ The current security-relevant areas are:
 - Local file logging.
 - Communication with the LocalHive Master.
 - Local Docker workload policy.
+- Workspace artifact download, unpacking, and read-only Docker mounting.
 - GitHub Actions permissions.
 
 The Agent executes only supported assigned workloads through registered executors. Docker workload V1 is constrained by local Agent policy and fixed Docker flags. Future executor expansion and broader process management will require a separate threat model.
@@ -130,6 +131,8 @@ Stored fields:
 The config file is not encrypted. It intentionally does not contain the API key.
 
 Docker policy is local Agent security configuration. See [docker-policy.md](docker-policy.md) for the current Docker workload limits and failure behavior.
+
+Workspace artifact handling is execution-scoped and local to the Agent. The Agent downloads workspace packages with the Worker API key and execution lease, stores them under `.localhive-agent/workspaces/<executionId>/`, rejects unsafe ZIP paths and symlink path chains, and mounts the unpacked workspace read-only at `/workspace`. See [workspace-artifacts.md](workspace-artifacts.md).
 
 ## Network Security
 
