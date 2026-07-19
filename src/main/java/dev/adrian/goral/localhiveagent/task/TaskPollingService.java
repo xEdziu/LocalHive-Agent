@@ -268,13 +268,15 @@ public final class TaskPollingService implements AutoCloseable {
         recordTaskHistory("record claimed execution", () ->
                 taskHistoryStore.recordClaimed(
                         payload.executionId(),
+                        claimed.displayName(),
                         payload.executorId(),
                         payload.executorContractVersion(),
                         clock.instant()
                 ));
         log.info(
-                "Claimed execution {} executor={}/{} leaseExpiresAt={}",
+                "Claimed execution {} displayName=\"{}\" executor={}/{} leaseExpiresAt={}",
                 claimed.executionId(),
+                claimed.displayName(),
                 claimed.executorId(),
                 claimed.executorContractVersion(),
                 claimed.leaseExpiresAt()

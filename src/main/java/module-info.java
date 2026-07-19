@@ -12,6 +12,7 @@ module dev.adrian.goral.localhiveagent {
     requires com.sun.jna;
     requires com.sun.jna.platform;
 
+    requires com.fasterxml.jackson.annotation;
     requires tools.jackson.databind;
 
     requires eu.hansolo.tilesfx;

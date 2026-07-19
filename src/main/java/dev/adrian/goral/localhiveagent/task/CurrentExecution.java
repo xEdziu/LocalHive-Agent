@@ -8,6 +8,7 @@ import java.util.UUID;
 
 public record CurrentExecution(
         UUID executionId,
+        String displayName,
         String executorId,
         int executorContractVersion,
         String leaseToken,
@@ -19,6 +20,7 @@ public record CurrentExecution(
     public CurrentExecution {
         Objects.requireNonNull(executionId, "executionId is required");
         executorId = requireNonBlank(executorId, "executorId");
+        displayName = normalizeDisplayName(displayName, executorId);
         leaseToken = requireNonBlank(leaseToken, "leaseToken");
         Objects.requireNonNull(leaseExpiresAt, "leaseExpiresAt is required");
         Objects.requireNonNull(status, "status is required");
@@ -29,6 +31,7 @@ public record CurrentExecution(
         Objects.requireNonNull(payload, "payload is required");
         return new CurrentExecution(
                 payload.executionId(),
+                payload.displayNameOrFallback(),
                 payload.executorId(),
                 payload.executorContractVersion(),
                 payload.leaseToken(),
@@ -41,6 +44,7 @@ public record CurrentExecution(
     public CurrentExecution withStatus(CurrentExecutionStatus nextStatus) {
         return new CurrentExecution(
                 executionId,
+                displayName,
                 executorId,
                 executorContractVersion,
                 leaseToken,
@@ -53,6 +57,7 @@ public record CurrentExecution(
     public CurrentExecution withLeaseExpiresAt(LocalDateTime nextLeaseExpiresAt) {
         return new CurrentExecution(
                 executionId,
+                displayName,
                 executorId,
                 executorContractVersion,
                 leaseToken,
@@ -65,6 +70,7 @@ public record CurrentExecution(
     public CurrentExecution withError(String error) {
         return new CurrentExecution(
                 executionId,
+                displayName,
                 executorId,
                 executorContractVersion,
                 leaseToken,
@@ -75,13 +81,14 @@ public record CurrentExecution(
     }
 
     public String summary() {
-        String base = executorId + " / " + status;
+        String base = displayName + " / " + status;
         return lastError.isBlank() ? base : base + " / " + lastError;
     }
 
     @Override
     public String toString() {
         return "CurrentExecution[executionId=" + executionId
+                + ", displayName=" + displayName
                 + ", executorId=" + executorId
                 + ", executorContractVersion=" + executorContractVersion
                 + ", leaseExpiresAt=" + leaseExpiresAt
@@ -96,5 +103,18 @@ public record CurrentExecution(
         }
 
         return value;
+    }
+
+    private static String normalizeDisplayName(String value, String fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+
+        String trimmed = value.trim();
+        if (trimmed.length() > 255) {
+            throw new IllegalArgumentException("displayName must be at most 255 characters.");
+        }
+
+        return trimmed;
     }
 }

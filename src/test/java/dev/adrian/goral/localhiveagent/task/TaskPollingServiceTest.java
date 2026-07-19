@@ -140,6 +140,28 @@ class TaskPollingServiceTest {
     }
 
     @Test
+    void shouldPublishDisplayNameForCurrentExecutionAndTaskHistory() {
+        ManualExecutorService executionWorker = new ManualExecutorService();
+        TestFixture fixture = createFixture(false, true, AgentExecutorRegistry.withDefaultExecutors(), executionWorker);
+        fixture.taskClient.nextClaim = Optional.of(payload(
+                "Custom display task",
+                AgentExecutorRegistry.NO_OP_EXECUTOR_ID,
+                AgentExecutorRegistry.NO_OP_CONTRACT_VERSION,
+                NOW.plusMinutes(1)
+        ));
+
+        fixture.startAndRunOnce();
+
+        CurrentExecution execution = fixture.currentExecutionStore.currentExecution().orElseThrow();
+        assertEquals("Custom display task", execution.displayName());
+        assertEquals("localhive.no-op", execution.executorId());
+        assertEquals("Custom display task / CLAIMED", fixture.agentStateStore.snapshot().currentExecutionSummary());
+        AgentTaskHistoryEntry history = fixture.taskHistoryStore.findByExecutionId(EXECUTION_ID).orElseThrow();
+        assertEquals("Custom display task", history.displayName());
+        assertEquals("Custom display task / CLAIMED", fixture.agentStateStore.snapshot().latestTaskHistorySummary());
+    }
+
+    @Test
     void shouldReportFailedWhenExecutorIsUnsupported() {
         TestFixture fixture = createFixture(false, true, AgentExecutorRegistry.withDefaultExecutors());
         fixture.taskClient.nextClaim = Optional.of(payload("localhive.missing", 1, NOW.plusMinutes(1)));
@@ -468,8 +490,16 @@ class TaskPollingServiceTest {
     }
 
     private static ClaimedExecutionPayload payload(String executorId, int executorContractVersion, LocalDateTime leaseExpiresAt) {
+        return payload(null, executorId, executorContractVersion, leaseExpiresAt);
+    }
+
+    private static ClaimedExecutionPayload payload(String displayName,
+                                                   String executorId,
+                                                   int executorContractVersion,
+                                                   LocalDateTime leaseExpiresAt) {
         return new ClaimedExecutionPayload(
                 EXECUTION_ID,
+                displayName,
                 executorId,
                 executorContractVersion,
                 Map.of("message", "hello"),
@@ -508,6 +538,7 @@ class TaskPollingServiceTest {
 
         @Override
         public void recordClaimed(UUID executionId,
+                                  String displayName,
                                   String executorId,
                                   int executorContractVersion,
                                   Instant claimedAt) {

@@ -7,6 +7,7 @@ import java.util.UUID;
 public record AgentTaskHistoryEntry(
         long id,
         UUID executionId,
+        String displayName,
         String executorId,
         int executorContractVersion,
         AgentTaskHistoryStatus status,
@@ -24,6 +25,7 @@ public record AgentTaskHistoryEntry(
     public AgentTaskHistoryEntry {
         Objects.requireNonNull(executionId, "executionId is required");
         executorId = requireNonBlank(executorId, "executorId");
+        displayName = normalizeDisplayName(displayName);
         Objects.requireNonNull(status, "status is required");
         Objects.requireNonNull(createdAtLocal, "createdAtLocal is required");
         Objects.requireNonNull(updatedAtLocal, "updatedAtLocal is required");
@@ -33,8 +35,19 @@ public record AgentTaskHistoryEntry(
     }
 
     public String summary() {
-        String base = executorId + " / " + status;
+        String base = displayNameOrFallback() + " / " + status;
         return durationMs == null ? base : base + " / " + durationMs + " ms";
+    }
+
+    public String displayNameOrFallback() {
+        if (displayName != null) {
+            return displayName;
+        }
+        if ("localhive.no-op".equals(executorId)) {
+            return "NO-OP smoke test";
+        }
+
+        return executorId;
     }
 
     @Override
@@ -42,6 +55,7 @@ public record AgentTaskHistoryEntry(
         return "AgentTaskHistoryEntry["
                 + "id=" + id
                 + ", executionId=" + executionId
+                + ", displayName=" + displayName
                 + ", executorId=" + executorId
                 + ", executorContractVersion=" + executorContractVersion
                 + ", status=" + status
@@ -63,6 +77,22 @@ public record AgentTaskHistoryEntry(
         }
 
         return value.trim();
+    }
+
+    private static String normalizeDisplayName(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String trimmed = value.trim();
+        if (trimmed.isBlank()) {
+            return null;
+        }
+        if (trimmed.length() > 255) {
+            throw new IllegalArgumentException("displayName must be at most 255 characters.");
+        }
+
+        return trimmed;
     }
 
     private static String normalize(String value) {

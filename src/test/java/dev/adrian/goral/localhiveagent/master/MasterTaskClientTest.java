@@ -59,6 +59,7 @@ class MasterTaskClientTest {
         httpClient.enqueue(200, """
                 {
                   "executionId": "223e4567-e89b-12d3-a456-426614174000",
+                  "displayName": "  NO-OP smoke test  ",
                   "executorId": "localhive.no-op",
                   "executorContractVersion": 1,
                   "configuration": {"message": "hello"},
@@ -75,6 +76,8 @@ class MasterTaskClientTest {
 
         assertTrue(response.isPresent());
         assertEquals(EXECUTION_ID, response.get().executionId());
+        assertEquals("NO-OP smoke test", response.get().displayName());
+        assertEquals("NO-OP smoke test", response.get().displayNameOrFallback());
         assertEquals("localhive.no-op", response.get().executorId());
         assertEquals(1, response.get().executorContractVersion());
         assertEquals("hello", response.get().configuration().get("message"));
@@ -89,6 +92,55 @@ class MasterTaskClientTest {
         assertEquals("/api/workers/" + WORKER_ID + "/assigned-executions/claim-next", request.path());
         assertEquals(API_KEY, request.header("X-API-KEY"));
         assertEquals("", request.body());
+    }
+
+    @Test
+    void shouldClaimAssignedExecutionWithoutDisplayName() {
+        FakeHttpClient httpClient = new FakeHttpClient();
+        httpClient.enqueue(200, """
+                {
+                  "executionId": "223e4567-e89b-12d3-a456-426614174000",
+                  "executorId": "localhive.no-op",
+                  "executorContractVersion": 1,
+                  "configuration": {"message": "hello"},
+                  "requiredRamMb": 0,
+                  "requiredCpuCores": 0,
+                  "gpuRequired": false,
+                  "leaseToken": "lease-token",
+                  "leaseExpiresAt": "2026-07-17T12:10:00"
+                }
+                """);
+        MasterTaskClient client = createClient(httpClient);
+
+        Optional<ClaimedExecutionPayload> response = client.claimNext(MASTER_BASE_URL, WORKER_ID, API_KEY);
+
+        assertTrue(response.isPresent());
+        assertEquals("NO-OP smoke test", response.get().displayNameOrFallback());
+    }
+
+    @Test
+    void shouldIgnoreUnknownFutureFieldsInClaimResponse() {
+        FakeHttpClient httpClient = new FakeHttpClient();
+        httpClient.enqueue(200, """
+                {
+                  "executionId": "223e4567-e89b-12d3-a456-426614174000",
+                  "executorId": "localhive.docker.workload",
+                  "executorContractVersion": 1,
+                  "configuration": {"image": "alpine:3.20"},
+                  "requiredRamMb": 128,
+                  "requiredCpuCores": 1,
+                  "gpuRequired": false,
+                  "leaseToken": "lease-token",
+                  "leaseExpiresAt": "2026-07-17T12:10:00",
+                  "futureField": {"safe": true}
+                }
+                """);
+        MasterTaskClient client = createClient(httpClient);
+
+        Optional<ClaimedExecutionPayload> response = client.claimNext(MASTER_BASE_URL, WORKER_ID, API_KEY);
+
+        assertTrue(response.isPresent());
+        assertEquals("Docker workload: alpine:3.20", response.get().displayNameOrFallback());
     }
 
     @Test

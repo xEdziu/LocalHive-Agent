@@ -6,6 +6,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.Statement;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -45,6 +48,8 @@ class AgentTaskHistoryStoreTest {
 
         AgentTaskHistoryEntry entry = store.findByExecutionId(EXECUTION_ID).orElseThrow();
         assertEquals(EXECUTION_ID, entry.executionId());
+        assertEquals("NO-OP smoke test", entry.displayName());
+        assertEquals("NO-OP smoke test", entry.displayNameOrFallback());
         assertEquals(AgentExecutorRegistry.NO_OP_EXECUTOR_ID, entry.executorId());
         assertEquals(AgentExecutorRegistry.NO_OP_CONTRACT_VERSION, entry.executorContractVersion());
         assertEquals(AgentTaskHistoryStatus.SUCCEEDED, entry.status());
@@ -55,6 +60,86 @@ class AgentTaskHistoryStoreTest {
         assertEquals("", entry.failureCode());
         assertEquals("", entry.failureMessage());
         assertEquals("", entry.lastError());
+    }
+
+    @Test
+    void shouldStoreTrimmedDisplayNameWithoutSecretsOrConfiguration() {
+        AgentTaskHistoryStore store = initializedStore();
+
+        store.recordClaimed(
+                EXECUTION_ID,
+                "  Custom smoke task  ",
+                AgentExecutorRegistry.NO_OP_EXECUTOR_ID,
+                AgentExecutorRegistry.NO_OP_CONTRACT_VERSION,
+                BASE_TIME
+        );
+        store.recordRunning(EXECUTION_ID, BASE_TIME.plusMillis(25));
+        store.recordSucceeded(EXECUTION_ID, BASE_TIME.plusMillis(75));
+
+        AgentTaskHistoryEntry entry = store.findByExecutionId(EXECUTION_ID).orElseThrow();
+        assertEquals("Custom smoke task", entry.displayName());
+        assertEquals("Custom smoke task", entry.displayNameOrFallback());
+        assertEquals("Custom smoke task / SUCCEEDED / 50 ms", entry.summary());
+
+        String text = entry.toString();
+        assertFalse(text.contains("leaseToken"));
+        assertFalse(text.contains("configuration"));
+    }
+
+    @Test
+    void initializeMigratesLegacyDatabaseAndKeepsDisplayFallback() throws Exception {
+        Path databasePath = historyPath();
+        Files.createDirectories(databasePath.getParent());
+        Class.forName("org.sqlite.JDBC");
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath.toAbsolutePath());
+             Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE agent_task_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        execution_id TEXT NOT NULL,
+                        executor_id TEXT NOT NULL,
+                        executor_contract_version INTEGER NOT NULL,
+                        status TEXT NOT NULL,
+                        claimed_at TEXT,
+                        started_at TEXT,
+                        completed_at TEXT,
+                        duration_ms INTEGER,
+                        failure_code TEXT,
+                        failure_message TEXT,
+                        last_error TEXT,
+                        created_at_local TEXT NOT NULL,
+                        updated_at_local TEXT NOT NULL
+                    )
+                    """);
+            statement.execute("""
+                    INSERT INTO agent_task_history (
+                        execution_id,
+                        executor_id,
+                        executor_contract_version,
+                        status,
+                        claimed_at,
+                        created_at_local,
+                        updated_at_local
+                    )
+                    VALUES (
+                        '223e4567-e89b-12d3-a456-426614174000',
+                        'localhive.no-op',
+                        1,
+                        'CLAIMED',
+                        '2026-07-17T12:00:00Z',
+                        '2026-07-17T12:00:00Z',
+                        '2026-07-17T12:00:00Z'
+                    )
+                    """);
+        }
+        AgentTaskHistoryStore store = new AgentTaskHistoryStore(databasePath);
+
+        store.initialize();
+
+        AgentTaskHistoryEntry entry = store.findByExecutionId(EXECUTION_ID).orElseThrow();
+        assertEquals(null, entry.displayName());
+        assertEquals("NO-OP smoke test", entry.displayNameOrFallback());
+        assertEquals("NO-OP smoke test / CLAIMED", entry.summary());
     }
 
     @Test
@@ -153,6 +238,7 @@ class AgentTaskHistoryStoreTest {
 
         store.recordClaimed(
                 EXECUTION_ID,
+                "NO-OP smoke test",
                 AgentExecutorRegistry.NO_OP_EXECUTOR_ID,
                 AgentExecutorRegistry.NO_OP_CONTRACT_VERSION,
                 BASE_TIME
@@ -184,6 +270,7 @@ class AgentTaskHistoryStoreTest {
                                       Instant claimedAt) {
         store.recordClaimed(
                 executionId,
+                "NO-OP smoke test",
                 executorId,
                 AgentExecutorRegistry.NO_OP_CONTRACT_VERSION,
                 claimedAt

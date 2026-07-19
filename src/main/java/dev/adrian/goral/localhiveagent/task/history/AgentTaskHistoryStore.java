@@ -38,6 +38,7 @@ public class AgentTaskHistoryStore {
             CREATE TABLE IF NOT EXISTS agent_task_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 execution_id TEXT NOT NULL,
+                display_name TEXT,
                 executor_id TEXT NOT NULL,
                 executor_contract_version INTEGER NOT NULL,
                 status TEXT NOT NULL,
@@ -85,6 +86,7 @@ public class AgentTaskHistoryStore {
                 try (Connection connection = openConnection();
                      Statement statement = connection.createStatement()) {
                     statement.execute(SCHEMA_SQL);
+                    ensureDisplayNameColumn(connection);
                     statement.execute(EXECUTION_ID_INDEX_SQL);
                     statement.execute(CREATED_AT_INDEX_SQL);
                 }
@@ -97,10 +99,12 @@ public class AgentTaskHistoryStore {
     }
 
     public void recordClaimed(UUID executionId,
+                              String displayName,
                               String executorId,
                               int executorContractVersion,
                               Instant claimedAt) {
         UUID validExecutionId = Objects.requireNonNull(executionId, "executionId is required");
+        String normalizedDisplayName = normalizeDisplayName(displayName);
         String validExecutorId = requireNonBlank(executorId, "executorId");
         Instant timestamp = Objects.requireNonNull(claimedAt, "claimedAt is required");
 
@@ -111,6 +115,7 @@ public class AgentTaskHistoryStore {
                     int updated = updateClaimed(
                             connection,
                             validExecutionId,
+                            normalizedDisplayName,
                             validExecutorId,
                             executorContractVersion,
                             timestamp
@@ -119,6 +124,7 @@ public class AgentTaskHistoryStore {
                         insertClaimed(
                                 connection,
                                 validExecutionId,
+                                normalizedDisplayName,
                                 validExecutorId,
                                 executorContractVersion,
                                 timestamp
@@ -310,12 +316,14 @@ public class AgentTaskHistoryStore {
 
     private int updateClaimed(Connection connection,
                               UUID executionId,
+                              String displayName,
                               String executorId,
                               int executorContractVersion,
                               Instant timestamp) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 UPDATE agent_task_history
-                SET executor_id = ?,
+                SET display_name = ?,
+                    executor_id = ?,
                     executor_contract_version = ?,
                     status = ?,
                     claimed_at = ?,
@@ -328,24 +336,27 @@ public class AgentTaskHistoryStore {
                     updated_at_local = ?
                 WHERE execution_id = ?
                 """)) {
-            statement.setString(1, executorId);
-            statement.setInt(2, executorContractVersion);
-            statement.setString(3, AgentTaskHistoryStatus.CLAIMED.name());
-            statement.setString(4, timestamp.toString());
+            setNullableString(statement, 1, displayName);
+            statement.setString(2, executorId);
+            statement.setInt(3, executorContractVersion);
+            statement.setString(4, AgentTaskHistoryStatus.CLAIMED.name());
             statement.setString(5, timestamp.toString());
-            statement.setString(6, executionId.toString());
+            statement.setString(6, timestamp.toString());
+            statement.setString(7, executionId.toString());
             return statement.executeUpdate();
         }
     }
 
     private void insertClaimed(Connection connection,
                                UUID executionId,
+                               String displayName,
                                String executorId,
                                int executorContractVersion,
                                Instant timestamp) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 INSERT INTO agent_task_history (
                     execution_id,
+                    display_name,
                     executor_id,
                     executor_contract_version,
                     status,
@@ -353,15 +364,16 @@ public class AgentTaskHistoryStore {
                     created_at_local,
                     updated_at_local
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """)) {
             statement.setString(1, executionId.toString());
-            statement.setString(2, executorId);
-            statement.setInt(3, executorContractVersion);
-            statement.setString(4, AgentTaskHistoryStatus.CLAIMED.name());
-            statement.setString(5, timestamp.toString());
+            setNullableString(statement, 2, displayName);
+            statement.setString(3, executorId);
+            statement.setInt(4, executorContractVersion);
+            statement.setString(5, AgentTaskHistoryStatus.CLAIMED.name());
             statement.setString(6, timestamp.toString());
             statement.setString(7, timestamp.toString());
+            statement.setString(8, timestamp.toString());
             statement.executeUpdate();
         }
     }
@@ -445,6 +457,7 @@ public class AgentTaskHistoryStore {
         return new AgentTaskHistoryEntry(
                 resultSet.getLong("id"),
                 UUID.fromString(resultSet.getString("execution_id")),
+                resultSet.getString("display_name"),
                 resultSet.getString("executor_id"),
                 resultSet.getInt("executor_contract_version"),
                 AgentTaskHistoryStatus.valueOf(resultSet.getString("status")),
@@ -510,6 +523,22 @@ public class AgentTaskHistoryStore {
         return value.trim();
     }
 
+    private static String normalizeDisplayName(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String trimmed = value.trim();
+        if (trimmed.isBlank()) {
+            return null;
+        }
+        if (trimmed.length() > 255) {
+            throw new IllegalArgumentException("displayName must be at most 255 characters.");
+        }
+
+        return trimmed;
+    }
+
     private static String safeText(String value) {
         if (value == null) {
             return "";
@@ -531,6 +560,21 @@ public class AgentTaskHistoryStore {
 
     private static void loadSqliteDriver() throws ClassNotFoundException {
         Class.forName("org.sqlite.JDBC");
+    }
+
+    private static void ensureDisplayNameColumn(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("PRAGMA table_info(agent_task_history)")) {
+            while (resultSet.next()) {
+                if ("display_name".equals(resultSet.getString("name"))) {
+                    return;
+                }
+            }
+        }
+
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("ALTER TABLE agent_task_history ADD COLUMN display_name TEXT");
+        }
     }
 
     @FunctionalInterface
