@@ -125,6 +125,7 @@ Docker policy is a local Agent security policy. The Master can assign a Docker w
 See [docs/docker-policy.md](docs/docker-policy.md) for the current Docker workload V1 limits, failure codes, and future extension path.
 See [docs/workspace-artifacts.md](docs/workspace-artifacts.md) for the current workspace artifact flow.
 See [docs/output-artifacts.md](docs/output-artifacts.md) for the current output artifact flow.
+See [docs/execution-display-metadata.md](docs/execution-display-metadata.md) for execution display names used by claim, current execution, and task history views.
 
 ## Credential Storage
 
@@ -197,6 +198,7 @@ CI uses Temurin 21, Maven cache, and uploads Surefire reports only on failure.
 - [Docker Policy](docs/docker-policy.md)
 - [Workspace Artifacts](docs/workspace-artifacts.md)
 - [Output Artifacts](docs/output-artifacts.md)
+- [Execution Display Metadata](docs/execution-display-metadata.md)
 - [Security](docs/security.md)
 - [Development](docs/development.md)
 

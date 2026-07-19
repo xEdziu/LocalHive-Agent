@@ -137,6 +137,8 @@ Workspace artifact handling is execution-scoped and local to the Agent. The Agen
 
 Output artifact handling is execution-scoped and local to the Agent. The Agent creates `.localhive-agent/outputs/<executionId>/output`, mounts it writable at `/output`, scans regular files after Docker exits, rejects symlinks and unsafe paths, and uploads files to the Master with the Worker API key and execution lease. Output relative paths are metadata only on the Master, and output contents are not stored in local SQLite history. See [output-artifacts.md](output-artifacts.md).
 
+Execution display names are user-visible metadata only. They are not used as paths, filenames, shell or Docker arguments, authorization inputs, or artifact storage keys. See [execution-display-metadata.md](execution-display-metadata.md).
+
 ## Network Security
 
 The Agent uses Java `HttpClient` for Master communication.

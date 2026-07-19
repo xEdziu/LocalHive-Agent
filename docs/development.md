@@ -46,6 +46,7 @@ docs/
   docker-policy.md
   workspace-artifacts.md
   output-artifacts.md
+  execution-display-metadata.md
 src/main/java/dev/adrian/goral/localhiveagent/
   app/
   config/
@@ -221,6 +222,8 @@ Use this sequence for new Agent capabilities:
 ## Future Task Protocol Work
 
 The current Agent supports the initial Task Protocol path through registered executors. Keep future additions aligned with the Master task domain and API.
+
+Agent AU0 consumes the optional Master claim response `displayName` field and still works with older Master claim responses that omit it. Future additive claim response fields are ignored by the claim DTO; see [execution-display-metadata.md](execution-display-metadata.md).
 
 Future work may include:
 

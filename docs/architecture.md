@@ -266,4 +266,6 @@ Docker workloads may optionally download a Master-provided workspace package, un
 
 Docker workloads also receive an Agent-generated writable `/output` directory. After the container exits, the Agent scans regular output files and uploads them to the Master before reporting the terminal execution result; see [output-artifacts.md](output-artifacts.md).
 
+Claimed executions may include a Master-provided `displayName`. The Agent stores the resolved display name in current execution state and local history for UI and log summaries, while executor lookup still uses `executorId` and `executorContractVersion`; see [execution-display-metadata.md](execution-display-metadata.md).
+
 Broader workload types, Minecraft workload execution, RCON, native packaging, output artifact UI, GPU execution, and current workload display remain future work.
