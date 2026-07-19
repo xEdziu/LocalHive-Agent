@@ -187,6 +187,24 @@ class TaskPollingServiceTest {
     }
 
     @Test
+    void shouldKeepExecutionRunningUntilExecutorReturns() {
+        FakeMasterTaskClient[] taskClientRef = new FakeMasterTaskClient[1];
+        AgentExecutor executor = (payload, context) -> {
+            assertEquals(List.of("RUNNING"), taskClientRef[0].reports);
+            return AgentExecutionResult.succeeded();
+        };
+        AgentExecutorRegistry registry = AgentExecutorRegistry.withDefaultExecutors();
+        registry.register("localhive.execution-order-test", 1, executor);
+        TestFixture fixture = createFixture(false, true, registry);
+        taskClientRef[0] = fixture.taskClient;
+        fixture.taskClient.nextClaim = Optional.of(payload("localhive.execution-order-test", 1, NOW.plusMinutes(1)));
+
+        fixture.startAndRunOnce();
+
+        assertEquals(List.of("RUNNING", "SUCCEEDED"), fixture.taskClient.reports);
+    }
+
+    @Test
     void shouldReportNoOpFailureCodeWhenNoOpExecutorFails() {
         TestFixture fixture = createFixture(false, true, AgentExecutorRegistry.withDefaultExecutors());
         fixture.taskClient.nextClaim = Optional.of(new ClaimedExecutionPayload(

@@ -29,4 +29,16 @@ class AgentPathsTest {
         assertTrue(AgentPaths.executionWorkspaceUnpackDirectory(executionId)
                 .endsWith(Path.of(".localhive-agent", "workspaces", executionId.toString(), "workspace")));
     }
+
+    @Test
+    void outputPathsLiveUnderAgentOutputDirectory() {
+        UUID executionId = UUID.fromString("223e4567-e89b-12d3-a456-426614174000");
+
+        assertTrue(AgentPaths.outputsDirectory()
+                .endsWith(Path.of(".localhive-agent", "outputs")));
+        assertTrue(AgentPaths.executionOutputRootDirectory(executionId)
+                .endsWith(Path.of(".localhive-agent", "outputs", executionId.toString())));
+        assertTrue(AgentPaths.executionOutputDirectory(executionId)
+                .endsWith(Path.of(".localhive-agent", "outputs", executionId.toString(), "output")));
+    }
 }

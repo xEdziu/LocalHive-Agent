@@ -22,6 +22,9 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
     public static final String WORKSPACE_ARTIFACT_DOWNLOAD_FAILED_CODE = "WORKSPACE_ARTIFACT_DOWNLOAD_FAILED";
     public static final String WORKSPACE_PACKAGE_INVALID_CODE = "WORKSPACE_PACKAGE_INVALID";
     public static final String WORKSPACE_UNPACK_FAILED_CODE = "WORKSPACE_UNPACK_FAILED";
+    public static final String OUTPUT_DIRECTORY_PREPARATION_FAILED_CODE = "OUTPUT_DIRECTORY_PREPARATION_FAILED";
+    public static final String OUTPUT_DIRECTORY_INVALID_CODE = "OUTPUT_DIRECTORY_INVALID";
+    public static final String OUTPUT_ARTIFACT_UPLOAD_FAILED_CODE = "OUTPUT_ARTIFACT_UPLOAD_FAILED";
 
     private static final Logger log = LoggerFactory.getLogger(DockerWorkloadExecutor.class);
     private static final int FAILURE_MESSAGE_OUTPUT_LIMIT = 512;
@@ -32,6 +35,9 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
     private final DockerAvailabilityChecker availabilityChecker;
     private final DockerCommandRunner commandRunner;
     private final WorkspacePreparer workspacePreparer;
+    private final OutputDirectoryPreparer outputDirectoryPreparer;
+    private final OutputArtifactScanner outputArtifactScanner;
+    private final OutputArtifactUploader outputArtifactUploader;
 
     public DockerWorkloadExecutor() {
         this(
@@ -40,7 +46,10 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
                 new DockerCommandBuilder(),
                 new DockerCliAvailabilityChecker(),
                 new ProcessDockerCommandRunner(),
-                new WorkspaceArtifactService()
+                new WorkspaceArtifactService(),
+                new OutputDirectoryService(),
+                new OutputDirectoryScanner(),
+                new MasterOutputArtifactUploader()
         );
     }
 
@@ -65,12 +74,37 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
                            DockerAvailabilityChecker availabilityChecker,
                            DockerCommandRunner commandRunner,
                            WorkspacePreparer workspacePreparer) {
+        this(
+                policyProvider,
+                configParser,
+                commandBuilder,
+                availabilityChecker,
+                commandRunner,
+                workspacePreparer,
+                new OutputDirectoryService(),
+                new OutputDirectoryScanner(),
+                new MasterOutputArtifactUploader()
+        );
+    }
+
+    DockerWorkloadExecutor(Supplier<DockerPolicy> policyProvider,
+                           DockerWorkloadConfigParser configParser,
+                           DockerCommandBuilder commandBuilder,
+                           DockerAvailabilityChecker availabilityChecker,
+                           DockerCommandRunner commandRunner,
+                           WorkspacePreparer workspacePreparer,
+                           OutputDirectoryPreparer outputDirectoryPreparer,
+                           OutputArtifactScanner outputArtifactScanner,
+                           OutputArtifactUploader outputArtifactUploader) {
         this.policyProvider = Objects.requireNonNull(policyProvider, "policyProvider is required");
         this.configParser = Objects.requireNonNull(configParser, "configParser is required");
         this.commandBuilder = Objects.requireNonNull(commandBuilder, "commandBuilder is required");
         this.availabilityChecker = Objects.requireNonNull(availabilityChecker, "availabilityChecker is required");
         this.commandRunner = Objects.requireNonNull(commandRunner, "commandRunner is required");
         this.workspacePreparer = Objects.requireNonNull(workspacePreparer, "workspacePreparer is required");
+        this.outputDirectoryPreparer = Objects.requireNonNull(outputDirectoryPreparer, "outputDirectoryPreparer is required");
+        this.outputArtifactScanner = Objects.requireNonNull(outputArtifactScanner, "outputArtifactScanner is required");
+        this.outputArtifactUploader = Objects.requireNonNull(outputArtifactUploader, "outputArtifactUploader is required");
     }
 
     @Override
@@ -109,9 +143,20 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
             return AgentExecutionResult.failed(WORKSPACE_UNPACK_FAILED_CODE, exception.getMessage());
         }
 
-        List<String> command = preparedWorkspace == null
-                ? commandBuilder.build(config)
-                : commandBuilder.build(config, preparedWorkspace.directory());
+        PreparedOutputDirectory preparedOutputDirectory;
+        try {
+            preparedOutputDirectory = outputDirectoryPreparer.prepare(payload.executionId());
+        } catch (OutputDirectoryPreparationException exception) {
+            return AgentExecutionResult.failed(OUTPUT_DIRECTORY_PREPARATION_FAILED_CODE, exception.getMessage());
+        } catch (OutputDirectoryInvalidException exception) {
+            return AgentExecutionResult.failed(OUTPUT_DIRECTORY_INVALID_CODE, exception.getMessage());
+        }
+
+        List<String> command = commandBuilder.build(
+                config,
+                preparedWorkspace == null ? null : preparedWorkspace.directory(),
+                preparedOutputDirectory.directory()
+        );
         DockerCommandResult result;
         try {
             result = commandRunner.run(command, Duration.ofSeconds(config.timeoutSeconds()));
@@ -143,14 +188,18 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
                     "Docker workload exceeded timeout of " + config.timeoutSeconds() + " seconds."
             );
         }
+
+        AgentExecutionResult dockerResult;
         if (result.exitCode() != 0) {
-            return AgentExecutionResult.failed(
+            dockerResult = AgentExecutionResult.failed(
                     WORKLOAD_FAILED_FAILURE_CODE,
                     shortMessage("Docker workload exited with code " + result.exitCode() + ".", result.stderr())
             );
+        } else {
+            dockerResult = AgentExecutionResult.succeeded();
         }
 
-        return AgentExecutionResult.succeeded();
+        return scanAndUploadOutputs(payload, context, preparedOutputDirectory, dockerResult);
     }
 
     private boolean isDockerAvailable() {
@@ -178,11 +227,73 @@ public final class DockerWorkloadExecutor implements AgentExecutor {
         );
     }
 
+    private AgentExecutionResult scanAndUploadOutputs(ClaimedExecutionPayload payload,
+                                                      AgentExecutionContext context,
+                                                      PreparedOutputDirectory preparedOutputDirectory,
+                                                      AgentExecutionResult dockerResult) {
+        List<OutputArtifactFile> outputFiles;
+        try {
+            outputFiles = outputArtifactScanner.scan(preparedOutputDirectory.directory());
+        } catch (OutputDirectoryInvalidException exception) {
+            if (dockerResult.success()) {
+                return AgentExecutionResult.failed(
+                        OUTPUT_DIRECTORY_INVALID_CODE,
+                        shortMessage("Output directory is invalid.", exception.getMessage())
+                );
+            }
+
+            log.warn(
+                    "Output directory scan failed after Docker failure. executionId={} preservedFailureCode={} errorType={}",
+                    payload.executionId(),
+                    dockerResult.failureCode(),
+                    exception.getClass().getSimpleName()
+            );
+            return dockerResult;
+        }
+
+        if (outputFiles.isEmpty()) {
+            log.info("No output artifacts found for execution {}.", payload.executionId());
+            return dockerResult;
+        }
+
+        try {
+            outputArtifactUploader.uploadAll(context, payload, outputFiles);
+            log.info(
+                    "Uploaded output artifacts for execution {}. fileCount={} totalBytes={}",
+                    payload.executionId(),
+                    outputFiles.size(),
+                    totalBytes(outputFiles)
+            );
+            return dockerResult;
+        } catch (RuntimeException exception) {
+            if (dockerResult.success()) {
+                return AgentExecutionResult.failed(
+                        OUTPUT_ARTIFACT_UPLOAD_FAILED_CODE,
+                        shortMessage("Output artifact upload failed.", exception.getMessage())
+                );
+            }
+
+            log.warn(
+                    "Output artifact upload failed after Docker failure. executionId={} preservedFailureCode={} errorType={}",
+                    payload.executionId(),
+                    dockerResult.failureCode(),
+                    exception.getClass().getSimpleName()
+            );
+            return dockerResult;
+        }
+    }
+
     private static String shortMessage(String prefix, String detail) {
         String normalizedDetail = detail == null ? "" : detail.trim();
         String message = normalizedDetail.isBlank() ? prefix : prefix + " " + normalizedDetail;
         return message.length() <= FAILURE_MESSAGE_OUTPUT_LIMIT
                 ? message
                 : message.substring(0, FAILURE_MESSAGE_OUTPUT_LIMIT);
+    }
+
+    private static long totalBytes(List<OutputArtifactFile> outputFiles) {
+        return outputFiles.stream()
+                .mapToLong(OutputArtifactFile::sizeBytes)
+                .sum();
     }
 }

@@ -12,6 +12,8 @@ public final class AgentPaths {
     private static final String WORKSPACES_DIRECTORY_NAME = "workspaces";
     private static final String WORKSPACE_PACKAGE_FILE_NAME = "package.zip";
     private static final String WORKSPACE_UNPACK_DIRECTORY_NAME = "workspace";
+    private static final String OUTPUTS_DIRECTORY_NAME = "outputs";
+    private static final String EXECUTION_OUTPUT_DIRECTORY_NAME = "output";
 
     private AgentPaths() {
     }
@@ -49,5 +51,20 @@ public final class AgentPaths {
 
     public static Path executionWorkspaceUnpackDirectory(UUID executionId) {
         return executionWorkspaceDirectory(executionId).resolve(WORKSPACE_UNPACK_DIRECTORY_NAME);
+    }
+
+    public static Path outputsDirectory() {
+        return agentDirectory().resolve(OUTPUTS_DIRECTORY_NAME);
+    }
+
+    public static Path executionOutputRootDirectory(UUID executionId) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("executionId is required");
+        }
+        return outputsDirectory().resolve(executionId.toString());
+    }
+
+    public static Path executionOutputDirectory(UUID executionId) {
+        return executionOutputRootDirectory(executionId).resolve(EXECUTION_OUTPUT_DIRECTORY_NAME);
     }
 }

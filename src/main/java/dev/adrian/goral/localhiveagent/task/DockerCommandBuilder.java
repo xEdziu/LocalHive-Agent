@@ -12,6 +12,10 @@ public final class DockerCommandBuilder {
     }
 
     public List<String> build(DockerWorkloadConfig config, Path workspaceDirectory) {
+        return build(config, workspaceDirectory, null);
+    }
+
+    public List<String> build(DockerWorkloadConfig config, Path workspaceDirectory, Path outputDirectory) {
         DockerWorkloadConfig workloadConfig = Objects.requireNonNull(config, "config is required");
 
         List<String> command = new ArrayList<>();
@@ -26,14 +30,18 @@ public final class DockerCommandBuilder {
         command.add(Integer.toString(workloadConfig.cpuCores()));
         if (workloadConfig.workspace() != null) {
             command.add("--mount");
-            command.add(mountArgument(workloadConfig, workspaceDirectory));
+            command.add(workspaceMountArgument(workloadConfig, workspaceDirectory));
+        }
+        if (outputDirectory != null) {
+            command.add("--mount");
+            command.add(outputMountArgument(outputDirectory));
         }
         command.add(workloadConfig.image());
         command.addAll(workloadConfig.command());
         return List.copyOf(command);
     }
 
-    private static String mountArgument(DockerWorkloadConfig config, Path workspaceDirectory) {
+    private static String workspaceMountArgument(DockerWorkloadConfig config, Path workspaceDirectory) {
         Path source = Objects.requireNonNull(workspaceDirectory, "workspaceDirectory is required")
                 .toAbsolutePath()
                 .normalize();
@@ -42,5 +50,14 @@ public final class DockerCommandBuilder {
                 + ",target="
                 + config.workspace().mountPath()
                 + ",readonly";
+    }
+
+    private static String outputMountArgument(Path outputDirectory) {
+        Path source = Objects.requireNonNull(outputDirectory, "outputDirectory is required")
+                .toAbsolutePath()
+                .normalize();
+        return "type=bind,source="
+                + source
+                + ",target=/output";
     }
 }

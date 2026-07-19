@@ -54,7 +54,44 @@ class DockerCommandBuilderTest {
     }
 
     @Test
-    void shouldAddReadOnlyWorkspaceMountWhenWorkspaceIsConfigured() {
+    void shouldAddWritableOutputMount() {
+        DockerCommandBuilder builder = new DockerCommandBuilder();
+        DockerWorkloadConfig config = new DockerWorkloadConfig(
+                "alpine:3.20",
+                List.of("sh", "-c", "echo LocalHive Docker workload"),
+                30,
+                128,
+                1,
+                false,
+                null
+        );
+        Path outputDirectory = Path.of("build", "localhive-output");
+
+        List<String> command = builder.build(config, null, outputDirectory);
+
+        assertEquals("--mount", command.get(9));
+        assertEquals(
+                "type=bind,source="
+                        + outputDirectory.toAbsolutePath().normalize()
+                        + ",target=/output",
+                command.get(10)
+        );
+        assertEquals("alpine:3.20", command.get(11));
+        assertFalse(command.toString().contains("readonly,target=/output"));
+        assertFalse(command.contains("--privileged"));
+        assertFalse(command.contains("--network=host"));
+        assertFalse(command.contains("--volume"));
+        assertFalse(command.contains("-v"));
+        assertFalse(command.contains("--env"));
+        assertFalse(command.contains("-e"));
+        assertFalse(command.contains("--cap-add"));
+        assertFalse(command.contains("--pid"));
+        assertFalse(command.contains("--ipc"));
+        assertFalse(command.toString().contains("docker.sock"));
+    }
+
+    @Test
+    void shouldAddReadOnlyWorkspaceAndWritableOutputMountsWhenWorkspaceIsConfigured() {
         DockerCommandBuilder builder = new DockerCommandBuilder();
         DockerWorkloadConfig config = new DockerWorkloadConfig(
                 "alpine:3.20",
@@ -70,8 +107,9 @@ class DockerCommandBuilderTest {
                 )
         );
         Path workspaceDirectory = Path.of("build", "localhive-workspace");
+        Path outputDirectory = Path.of("build", "localhive-output");
 
-        List<String> command = builder.build(config, workspaceDirectory);
+        List<String> command = builder.build(config, workspaceDirectory, outputDirectory);
 
         assertEquals("--mount", command.get(9));
         assertEquals(
@@ -80,8 +118,15 @@ class DockerCommandBuilderTest {
                         + ",target=/workspace,readonly",
                 command.get(10)
         );
-        assertEquals("alpine:3.20", command.get(11));
-        assertEquals("sh", command.get(12));
+        assertEquals("--mount", command.get(11));
+        assertEquals(
+                "type=bind,source="
+                        + outputDirectory.toAbsolutePath().normalize()
+                        + ",target=/output",
+                command.get(12)
+        );
+        assertEquals("alpine:3.20", command.get(13));
+        assertEquals("sh", command.get(14));
         assertFalse(command.contains("--privileged"));
         assertFalse(command.contains("--network=host"));
         assertFalse(command.contains("--volume"));

@@ -24,6 +24,7 @@ class DockerWorkloadExecutorTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-07-17T12:00:00Z"), ZoneOffset.UTC);
     private static final UUID WORKER_ID = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
     private static final UUID WORKSPACE_ARTIFACT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final Path OUTPUT_DIRECTORY = Path.of("build", "output-test");
 
     @Test
     void shouldReturnUnavailableWhenDockerCliIsMissing() {
@@ -56,6 +57,8 @@ class DockerWorkloadExecutorTest {
                 "128m",
                 "--cpus",
                 "1",
+                "--mount",
+                "type=bind,source=" + OUTPUT_DIRECTORY.toAbsolutePath().normalize() + ",target=/output",
                 "alpine:3.20",
                 "sh",
                 "-c",
@@ -83,7 +86,180 @@ class DockerWorkloadExecutorTest {
                 "type=bind,source=" + workspaceDirectory.toAbsolutePath().normalize() + ",target=/workspace,readonly",
                 runner.command.get(10)
         );
-        assertEquals("alpine:3.20", runner.command.get(11));
+        assertEquals("--mount", runner.command.get(11));
+        assertEquals(
+                "type=bind,source=" + OUTPUT_DIRECTORY.toAbsolutePath().normalize() + ",target=/output",
+                runner.command.get(12)
+        );
+        assertEquals("alpine:3.20", runner.command.get(13));
+    }
+
+    @Test
+    void shouldKeepSuccessWhenOutputDirectoryIsEmpty() {
+        FakeRunner runner = new FakeRunner(DockerCommandResult.completed(0, "ok", "", 10));
+        FakeOutputScanner scanner = new FakeOutputScanner(List.of());
+        FakeOutputUploader uploader = new FakeOutputUploader();
+        DockerWorkloadExecutor executor = executor(
+                DockerPolicy.defaultPolicy(),
+                true,
+                runner,
+                NoWorkspacePreparer.INSTANCE,
+                defaultOutputPreparer(),
+                scanner,
+                uploader
+        );
+
+        AgentExecutionResult result = executor.execute(payload(validConfig()), context());
+
+        assertTrue(result.success());
+        assertEquals(1, scanner.calls);
+        assertEquals(0, uploader.calls);
+    }
+
+    @Test
+    void shouldUploadOutputFilesAfterDockerSuccess() {
+        FakeRunner runner = new FakeRunner(DockerCommandResult.completed(0, "ok", "", 10));
+        List<OutputArtifactFile> outputFiles = List.of(
+                new OutputArtifactFile(Path.of("build", "output-test", "a.txt"), "a.txt", 1),
+                new OutputArtifactFile(Path.of("build", "output-test", "dir", "b.txt"), "dir/b.txt", 2)
+        );
+        FakeOutputScanner scanner = new FakeOutputScanner(outputFiles);
+        FakeOutputUploader uploader = new FakeOutputUploader();
+        DockerWorkloadExecutor executor = executor(
+                DockerPolicy.defaultPolicy(),
+                true,
+                runner,
+                NoWorkspacePreparer.INSTANCE,
+                defaultOutputPreparer(),
+                scanner,
+                uploader
+        );
+
+        AgentExecutionResult result = executor.execute(payload(validConfig()), context());
+
+        assertTrue(result.success());
+        assertEquals(1, uploader.calls);
+        assertEquals(outputFiles, uploader.outputFiles);
+    }
+
+    @Test
+    void shouldMapDockerSuccessAndOutputUploadFailureToOutputArtifactUploadFailed() {
+        DockerWorkloadExecutor executor = executor(
+                DockerPolicy.defaultPolicy(),
+                true,
+                new FakeRunner(DockerCommandResult.completed(0, "ok", "", 10)),
+                NoWorkspacePreparer.INSTANCE,
+                defaultOutputPreparer(),
+                new FakeOutputScanner(List.of(new OutputArtifactFile(Path.of("output.txt"), "output.txt", 1))),
+                new ThrowingOutputUploader(new MasterClientException("upload rejected"))
+        );
+
+        AgentExecutionResult result = executor.execute(payload(validConfig()), context());
+
+        assertFalse(result.success());
+        assertEquals(DockerWorkloadExecutor.OUTPUT_ARTIFACT_UPLOAD_FAILED_CODE, result.failureCode());
+    }
+
+    @Test
+    void shouldPreserveDockerFailureWhenOutputUploadSucceeds() {
+        FakeOutputUploader uploader = new FakeOutputUploader();
+        DockerWorkloadExecutor executor = executor(
+                DockerPolicy.defaultPolicy(),
+                true,
+                new FakeRunner(DockerCommandResult.completed(7, "", "boom", 10)),
+                NoWorkspacePreparer.INSTANCE,
+                defaultOutputPreparer(),
+                new FakeOutputScanner(List.of(new OutputArtifactFile(Path.of("output.txt"), "output.txt", 1))),
+                uploader
+        );
+
+        AgentExecutionResult result = executor.execute(payload(validConfig()), context());
+
+        assertFalse(result.success());
+        assertEquals(DockerWorkloadExecutor.WORKLOAD_FAILED_FAILURE_CODE, result.failureCode());
+        assertEquals(1, uploader.calls);
+    }
+
+    @Test
+    void shouldPreserveDockerFailureWhenOutputUploadFails() {
+        DockerWorkloadExecutor executor = executor(
+                DockerPolicy.defaultPolicy(),
+                true,
+                new FakeRunner(DockerCommandResult.completed(7, "", "boom", 10)),
+                NoWorkspacePreparer.INSTANCE,
+                defaultOutputPreparer(),
+                new FakeOutputScanner(List.of(new OutputArtifactFile(Path.of("output.txt"), "output.txt", 1))),
+                new ThrowingOutputUploader(new MasterClientException("upload rejected"))
+        );
+
+        AgentExecutionResult result = executor.execute(payload(validConfig()), context());
+
+        assertFalse(result.success());
+        assertEquals(DockerWorkloadExecutor.WORKLOAD_FAILED_FAILURE_CODE, result.failureCode());
+    }
+
+    @Test
+    void shouldSkipOutputUploadAfterTimeout() {
+        FakeOutputScanner scanner = new FakeOutputScanner(List.of(new OutputArtifactFile(Path.of("output.txt"), "output.txt", 1)));
+        FakeOutputUploader uploader = new FakeOutputUploader();
+        DockerWorkloadExecutor executor = executor(
+                DockerPolicy.defaultPolicy(),
+                true,
+                new FakeRunner(DockerCommandResult.timedOut("", "late", 30_000)),
+                NoWorkspacePreparer.INSTANCE,
+                defaultOutputPreparer(),
+                scanner,
+                uploader
+        );
+
+        AgentExecutionResult result = executor.execute(payload(validConfig()), context());
+
+        assertFalse(result.success());
+        assertEquals(DockerWorkloadExecutor.TIMEOUT_FAILURE_CODE, result.failureCode());
+        assertEquals(0, scanner.calls);
+        assertEquals(0, uploader.calls);
+    }
+
+    @Test
+    void shouldMapOutputDirectoryPreparationFailure() {
+        DockerWorkloadExecutor executor = executor(
+                DockerPolicy.defaultPolicy(),
+                true,
+                new FakeRunner(DockerCommandResult.completed(0, "", "", 1)),
+                NoWorkspacePreparer.INSTANCE,
+                executionId -> {
+                    throw new OutputDirectoryPreparationException("disk unavailable", new RuntimeException());
+                },
+                new FakeOutputScanner(List.of()),
+                new FakeOutputUploader()
+        );
+
+        AgentExecutionResult result = executor.execute(payload(validConfig()), context());
+
+        assertFalse(result.success());
+        assertEquals(DockerWorkloadExecutor.OUTPUT_DIRECTORY_PREPARATION_FAILED_CODE, result.failureCode());
+    }
+
+    @Test
+    void shouldMapOutputDirectoryInvalidBeforeDockerRun() {
+        FakeRunner runner = new FakeRunner(DockerCommandResult.completed(0, "", "", 1));
+        DockerWorkloadExecutor executor = executor(
+                DockerPolicy.defaultPolicy(),
+                true,
+                runner,
+                NoWorkspacePreparer.INSTANCE,
+                executionId -> {
+                    throw new OutputDirectoryInvalidException("symlink");
+                },
+                new FakeOutputScanner(List.of()),
+                new FakeOutputUploader()
+        );
+
+        AgentExecutionResult result = executor.execute(payload(validConfig()), context());
+
+        assertFalse(result.success());
+        assertEquals(DockerWorkloadExecutor.OUTPUT_DIRECTORY_INVALID_CODE, result.failureCode());
+        assertEquals(0, runner.calls);
     }
 
     @Test
@@ -266,12 +442,11 @@ class DockerWorkloadExecutorTest {
     }
 
     private static DockerWorkloadExecutor executor(DockerPolicy policy, boolean dockerAvailable, DockerCommandRunner runner) {
-        return new DockerWorkloadExecutor(
-                () -> policy,
-                new DockerWorkloadConfigParser(),
-                new DockerCommandBuilder(),
-                () -> dockerAvailable,
-                runner
+        return executor(
+                policy,
+                dockerAvailable,
+                runner,
+                NoWorkspacePreparer.INSTANCE
         );
     }
 
@@ -279,14 +454,39 @@ class DockerWorkloadExecutorTest {
                                                    boolean dockerAvailable,
                                                    DockerCommandRunner runner,
                                                    WorkspacePreparer workspacePreparer) {
+        return executor(
+                policy,
+                dockerAvailable,
+                runner,
+                workspacePreparer,
+                defaultOutputPreparer(),
+                new FakeOutputScanner(List.of()),
+                new FakeOutputUploader()
+        );
+    }
+
+    private static DockerWorkloadExecutor executor(DockerPolicy policy,
+                                                   boolean dockerAvailable,
+                                                   DockerCommandRunner runner,
+                                                   WorkspacePreparer workspacePreparer,
+                                                   OutputDirectoryPreparer outputDirectoryPreparer,
+                                                   OutputArtifactScanner outputArtifactScanner,
+                                                   OutputArtifactUploader outputArtifactUploader) {
         return new DockerWorkloadExecutor(
                 () -> policy,
                 new DockerWorkloadConfigParser(),
                 new DockerCommandBuilder(),
                 () -> dockerAvailable,
                 runner,
-                workspacePreparer
+                workspacePreparer,
+                outputDirectoryPreparer,
+                outputArtifactScanner,
+                outputArtifactUploader
         );
+    }
+
+    private static OutputDirectoryPreparer defaultOutputPreparer() {
+        return executionId -> new PreparedOutputDirectory(OUTPUT_DIRECTORY);
     }
 
     private static ClaimedExecutionPayload payload(Map<String, Object> configuration) {
@@ -393,6 +593,69 @@ class DockerWorkloadExecutorTest {
         public PreparedWorkspace prepare(AgentExecutionContext context,
                                          ClaimedExecutionPayload payload,
                                          DockerWorkspaceConfig workspace) {
+            throw exception;
+        }
+    }
+
+    private enum NoWorkspacePreparer implements WorkspacePreparer {
+        INSTANCE;
+
+        @Override
+        public PreparedWorkspace prepare(AgentExecutionContext context,
+                                         ClaimedExecutionPayload payload,
+                                         DockerWorkspaceConfig workspace) {
+            throw new IllegalStateException("Workspace should not be prepared.");
+        }
+    }
+
+    private static final class FakeOutputScanner implements OutputArtifactScanner {
+
+        private final List<OutputArtifactFile> result;
+        private Path outputDirectory;
+        private int calls;
+
+        private FakeOutputScanner(List<OutputArtifactFile> result) {
+            this.result = List.copyOf(result);
+        }
+
+        @Override
+        public List<OutputArtifactFile> scan(Path outputDirectory) {
+            this.outputDirectory = outputDirectory;
+            calls++;
+            return result;
+        }
+    }
+
+    private static final class FakeOutputUploader implements OutputArtifactUploader {
+
+        private AgentExecutionContext context;
+        private ClaimedExecutionPayload payload;
+        private List<OutputArtifactFile> outputFiles = List.of();
+        private int calls;
+
+        @Override
+        public void uploadAll(AgentExecutionContext context,
+                              ClaimedExecutionPayload payload,
+                              List<OutputArtifactFile> outputFiles) {
+            this.context = context;
+            this.payload = payload;
+            this.outputFiles = List.copyOf(outputFiles);
+            calls++;
+        }
+    }
+
+    private static final class ThrowingOutputUploader implements OutputArtifactUploader {
+
+        private final RuntimeException exception;
+
+        private ThrowingOutputUploader(RuntimeException exception) {
+            this.exception = exception;
+        }
+
+        @Override
+        public void uploadAll(AgentExecutionContext context,
+                              ClaimedExecutionPayload payload,
+                              List<OutputArtifactFile> outputFiles) {
             throw exception;
         }
     }

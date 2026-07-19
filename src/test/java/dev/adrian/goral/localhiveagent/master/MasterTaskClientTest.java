@@ -187,6 +187,68 @@ class MasterTaskClientTest {
     }
 
     @Test
+    void shouldUploadExecutionOutputArtifactToExecutionScopedEndpoint() throws IOException {
+        FakeHttpClient httpClient = new FakeHttpClient();
+        httpClient.enqueue(200, "{\"artifactId\":\"423e4567-e89b-12d3-a456-426614174000\"}");
+        MasterTaskClient client = createClient(httpClient);
+        Path outputFile = tempDir.resolve("result.txt");
+        Files.writeString(outputFile, "result");
+
+        client.uploadExecutionOutputArtifact(
+                MASTER_BASE_URL,
+                WORKER_ID,
+                EXECUTION_ID,
+                API_KEY,
+                LEASE_TOKEN,
+                outputFile,
+                "results/result.txt"
+        );
+
+        RecordedRequest request = httpClient.requests.getFirst();
+        assertEquals("POST", request.method());
+        assertEquals(
+                "/api/workers/" + WORKER_ID + "/executions/" + EXECUTION_ID + "/artifacts/output",
+                request.path()
+        );
+        assertEquals(API_KEY, request.header("X-API-KEY"));
+        assertEquals(LEASE_TOKEN, request.header("X-EXECUTION-LEASE"));
+        assertTrue(request.header("Content-Type").startsWith("multipart/form-data; boundary=LocalHiveBoundary"));
+        assertTrue(request.body().contains("name=\"file\"; filename=\"result.txt\""));
+        assertTrue(request.body().contains("Content-Type: application/octet-stream"));
+        assertTrue(request.body().contains("result"));
+        assertTrue(request.body().contains("name=\"relativePath\""));
+        assertTrue(request.body().contains("results/result.txt"));
+        assertEquals(-1L, request.bodyContentLength());
+    }
+
+    @Test
+    void shouldNotIncludeLeaseTokenOrResponseBodyInUploadHttpErrorMessage() throws IOException {
+        FakeHttpClient httpClient = new FakeHttpClient();
+        httpClient.enqueue(413, "rejected " + LEASE_TOKEN);
+        MasterTaskClient client = createClient(httpClient);
+        Path outputFile = tempDir.resolve("result.txt");
+        Files.writeString(outputFile, "result");
+
+        MasterClientException exception = assertThrows(
+                MasterClientException.class,
+                () -> client.uploadExecutionOutputArtifact(
+                        MASTER_BASE_URL,
+                        WORKER_ID,
+                        EXECUTION_ID,
+                        API_KEY,
+                        LEASE_TOKEN,
+                        outputFile,
+                        "results/result.txt"
+                )
+        );
+
+        assertEquals(413, exception.statusCode());
+        assertFalse(exception.getMessage().contains(LEASE_TOKEN));
+        assertFalse(exception.responseBody().contains(LEASE_TOKEN));
+        assertFalse(exception.getMessage().contains("rejected " + LEASE_TOKEN));
+    }
+
+    @Test
     void shouldRejectDownloadedArtifactOverLimitWithoutKeepingPartialFile() {
         FakeHttpClient httpClient = new FakeHttpClient();
         httpClient.enqueueBytes(200, "123456789".getBytes(StandardCharsets.UTF_8));
@@ -254,7 +316,8 @@ class MasterTaskClientTest {
             String method,
             String path,
             HttpHeaders headers,
-            String body
+            String body,
+            long bodyContentLength
     ) {
 
         private String header(String name) {
@@ -333,7 +396,8 @@ class MasterTaskClientTest {
                     request.method(),
                     request.uri().getPath(),
                     request.headers(),
-                    readBody(request)
+                    readBody(request),
+                    bodyContentLength(request)
             ));
             return (HttpResponse<T>) responses.removeFirst();
         }
@@ -416,6 +480,12 @@ class MasterTaskClientTest {
         BodyCaptureSubscriber subscriber = new BodyCaptureSubscriber();
         publisher.get().subscribe(subscriber);
         return subscriber.body();
+    }
+
+    private static long bodyContentLength(HttpRequest request) {
+        return request.bodyPublisher()
+                .map(HttpRequest.BodyPublisher::contentLength)
+                .orElse(0L);
     }
 
     private static final class BodyCaptureSubscriber implements Flow.Subscriber<ByteBuffer> {

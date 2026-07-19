@@ -6,21 +6,28 @@ import dev.adrian.goral.localhiveagent.master.dto.ExecutionStatusResponse;
 import dev.adrian.goral.localhiveagent.master.dto.LeaseRenewalResponse;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.SequenceInputStream;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.LinkOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 public class MasterTaskClient {
 
@@ -28,6 +35,7 @@ public class MasterTaskClient {
     private static final String EXECUTION_LEASE_HEADER = "X-EXECUTION-LEASE";
     private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(10);
+    private static final Pattern WINDOWS_DRIVE_PATH = Pattern.compile("^[A-Za-z]:.*");
     public static final long MAX_ARTIFACT_DOWNLOAD_BYTES = 50L * 1024L * 1024L;
 
     private final HttpClient httpClient;
@@ -167,6 +175,29 @@ public class MasterTaskClient {
         writeDownload(response.body(), targetFile);
     }
 
+    public void uploadExecutionOutputArtifact(String masterBaseUrl,
+                                              UUID workerId,
+                                              UUID executionId,
+                                              String apiKey,
+                                              String leaseToken,
+                                              Path file,
+                                              String relativePath) {
+        validateExecutionIdentity(workerId, executionId, apiKey, leaseToken);
+        Path source = requireRegularFile(file);
+        String uploadRelativePath = requireUploadRelativePath(relativePath);
+        String boundary = "LocalHiveBoundary" + UUID.randomUUID().toString().replace("-", "");
+
+        HttpRequest request = baseRequest(masterBaseUrl, executionPath(workerId, executionId, "artifacts/output"))
+                .header(API_KEY_HEADER, apiKey)
+                .header(EXECUTION_LEASE_HEADER, leaseToken)
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(multipartUploadBody(source, uploadRelativePath, boundary))
+                .build();
+
+        HttpResponse<Void> response = sendDiscarding(request);
+        ensureUploadSuccessful(response);
+    }
+
     private void sendExecutionStatus(String masterBaseUrl,
                                      UUID workerId,
                                      UUID executionId,
@@ -236,6 +267,27 @@ public class MasterTaskClient {
         }
     }
 
+    private HttpResponse<Void> sendDiscarding(HttpRequest request) {
+        try {
+            return httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new MasterClientException(
+                    "Output artifact upload request was interrupted.",
+                    "Output artifact upload request was interrupted.",
+                    exception
+            );
+        } catch (IOException exception) {
+            String userMessage = MasterClientErrorMapper.mapConnectionError("Upload execution output artifact", exception);
+
+            throw new MasterClientException(
+                    "Output artifact upload request failed.",
+                    userMessage,
+                    exception
+            );
+        }
+    }
+
     private void ensureDownloadSuccessful(HttpResponse<InputStream> response) {
         if (response.statusCode() == 200) {
             return;
@@ -245,6 +297,19 @@ public class MasterTaskClient {
         throw new MasterClientException(
                 "Download execution artifact failed.",
                 "Download execution artifact: Master rejected artifact download.",
+                response.statusCode(),
+            ""
+        );
+    }
+
+    private void ensureUploadSuccessful(HttpResponse<Void> response) {
+        if (response.statusCode() == 200 || response.statusCode() == 201) {
+            return;
+        }
+
+        throw new MasterClientException(
+                "Upload execution output artifact failed.",
+                "Upload execution output artifact: Master rejected output artifact upload.",
                 response.statusCode(),
                 ""
         );
@@ -313,6 +378,57 @@ public class MasterTaskClient {
         } catch (IOException ignored) {
             // Nothing useful to report when closing an unused error body.
         }
+    }
+
+    private static HttpRequest.BodyPublisher multipartUploadBody(Path file,
+                                                                 String relativePath,
+                                                                 String boundary) {
+        byte[] fileHeader = (
+                "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"file\"; filename=\""
+                        + multipartFilename(file)
+                        + "\"\r\n"
+                        + "Content-Type: application/octet-stream\r\n"
+                        + "\r\n"
+        ).getBytes(StandardCharsets.UTF_8);
+        byte[] metadataAndClosing = (
+                "\r\n"
+                        + "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"relativePath\"\r\n"
+                        + "\r\n"
+                        + relativePath
+                        + "\r\n"
+                        + "--" + boundary + "--\r\n"
+        ).getBytes(StandardCharsets.UTF_8);
+
+        return HttpRequest.BodyPublishers.ofInputStream(() -> {
+            try {
+                return new SequenceInputStream(Collections.enumeration(List.of(
+                        new ByteArrayInputStream(fileHeader),
+                        Files.newInputStream(file, StandardOpenOption.READ),
+                        new ByteArrayInputStream(metadataAndClosing)
+                )));
+            } catch (IOException exception) {
+                throw new UncheckedIOException(exception);
+            }
+        });
+    }
+
+    private static String multipartFilename(Path file) {
+        Path filename = file.getFileName();
+        String value = filename == null ? "artifact" : filename.toString().trim();
+        if (value.isBlank()) {
+            return "artifact";
+        }
+
+        String sanitized = value
+                .replace("\0", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .replace("\\", "_")
+                .replace("/", "_")
+                .replace("\"", "'");
+        return sanitized.isBlank() ? "artifact" : sanitized;
     }
 
     private String writeJson(Object value) {
@@ -424,5 +540,45 @@ public class MasterTaskClient {
         if (leaseToken == null || leaseToken.isBlank()) {
             throw new IllegalArgumentException("Execution lease token cannot be blank.");
         }
+    }
+
+    private static Path requireRegularFile(Path file) {
+        if (file == null) {
+            throw new IllegalArgumentException("Output artifact file cannot be null.");
+        }
+
+        Path source = file.toAbsolutePath().normalize();
+        if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalArgumentException("Output artifact file must be a regular file.");
+        }
+        return source;
+    }
+
+    private static String requireUploadRelativePath(String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
+            throw new IllegalArgumentException("Output artifact relative path cannot be blank.");
+        }
+
+        String normalized = relativePath.trim().replace('\\', '/');
+        if (normalized.length() > 1024) {
+            throw new IllegalArgumentException("Output artifact relative path must be at most 1024 characters.");
+        }
+        if (normalized.indexOf('\0') >= 0) {
+            throw new IllegalArgumentException("Output artifact relative path cannot contain a null byte.");
+        }
+        if (normalized.startsWith("/") || WINDOWS_DRIVE_PATH.matcher(normalized).matches()) {
+            throw new IllegalArgumentException("Output artifact relative path must be relative.");
+        }
+
+        for (String segment : normalized.split("/", -1)) {
+            if (segment.isBlank()) {
+                throw new IllegalArgumentException("Output artifact relative path cannot contain blank segments.");
+            }
+            if (".".equals(segment) || "..".equals(segment)) {
+                throw new IllegalArgumentException("Output artifact relative path cannot contain traversal segments.");
+            }
+        }
+
+        return normalized;
     }
 }
