@@ -43,6 +43,9 @@ docs/
   architecture.md
   security.md
   development.md
+  docker-policy.md
+  workspace-artifacts.md
+  output-artifacts.md
 src/main/java/dev/adrian/goral/localhiveagent/
   app/
   config/

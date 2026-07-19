@@ -20,7 +20,7 @@ Implemented:
 - Manual heartbeat controls for diagnostics.
 - Gamer Mode through Pause/Resume with rollback on failed Master update.
 - Central `AgentStateStore` used by the dashboard and tray.
-- Task polling with NO_OP execution, local task history, and constrained Docker workload execution.
+- Task polling with NO_OP execution, local task history, constrained Docker workload execution, workspace inputs, and output artifact upload.
 - Native or platform-aware API key storage: Windows DPAPI, Linux Secret Service, macOS Keychain, and an explicitly insecure local fallback.
 - Local bounded file logging with representative secret sanitization tests.
 - Cross-platform GitHub Actions CI for Ubuntu, Windows, and macOS.
@@ -120,10 +120,11 @@ The API key is not stored in `config.json`. It is stored through the selected `C
 
 ### Docker Policy
 
-Docker policy is a local Agent security policy. The Master can assign a Docker workload, but the Agent runs it only when the local policy allows the requested image and resources. Docker workloads may optionally mount a small read-only workspace artifact at `/workspace`.
+Docker policy is a local Agent security policy. The Master can assign a Docker workload, but the Agent runs it only when the local policy allows the requested image and resources. Docker workloads may optionally mount a small read-only workspace artifact at `/workspace` and always receive an Agent-generated writable `/output` directory for output artifacts.
 
 See [docs/docker-policy.md](docs/docker-policy.md) for the current Docker workload V1 limits, failure codes, and future extension path.
 See [docs/workspace-artifacts.md](docs/workspace-artifacts.md) for the current workspace artifact flow.
+See [docs/output-artifacts.md](docs/output-artifacts.md) for the current output artifact flow.
 
 ## Credential Storage
 
@@ -195,6 +196,7 @@ CI uses Temurin 21, Maven cache, and uploads Surefire reports only on failure.
 - [Architecture](docs/architecture.md)
 - [Docker Policy](docs/docker-policy.md)
 - [Workspace Artifacts](docs/workspace-artifacts.md)
+- [Output Artifacts](docs/output-artifacts.md)
 - [Security](docs/security.md)
 - [Development](docs/development.md)
 

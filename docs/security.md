@@ -13,6 +13,7 @@ The current security-relevant areas are:
 - Communication with the LocalHive Master.
 - Local Docker workload policy.
 - Workspace artifact download, unpacking, and read-only Docker mounting.
+- Output directory creation, scanning, and upload.
 - GitHub Actions permissions.
 
 The Agent executes only supported assigned workloads through registered executors. Docker workload V1 is constrained by local Agent policy and fixed Docker flags. Future executor expansion and broader process management will require a separate threat model.
@@ -134,6 +135,8 @@ Docker policy is local Agent security configuration. See [docker-policy.md](dock
 
 Workspace artifact handling is execution-scoped and local to the Agent. The Agent downloads workspace packages with the Worker API key and execution lease, stores them under `.localhive-agent/workspaces/<executionId>/`, rejects unsafe ZIP paths and symlink path chains, and mounts the unpacked workspace read-only at `/workspace`. See [workspace-artifacts.md](workspace-artifacts.md).
 
+Output artifact handling is execution-scoped and local to the Agent. The Agent creates `.localhive-agent/outputs/<executionId>/output`, mounts it writable at `/output`, scans regular files after Docker exits, rejects symlinks and unsafe paths, and uploads files to the Master with the Worker API key and execution lease. Output relative paths are metadata only on the Master, and output contents are not stored in local SQLite history. See [output-artifacts.md](output-artifacts.md).
+
 ## Network Security
 
 The Agent uses Java `HttpClient` for Master communication.
@@ -161,6 +164,7 @@ The current code mitigates these specific risks:
 - Own save/update byte buffers in the macOS backend are cleared after use.
 - Local logs are bounded.
 - Representative credential-related log messages are sanitized and tested.
+- Output artifact upload uses the Worker API key and execution lease without logging those secret values.
 - GitHub Actions workflow uses read-only repository permissions and disables persisted checkout credentials.
 
 ## Known Limitations

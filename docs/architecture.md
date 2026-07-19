@@ -264,4 +264,6 @@ The current Task Protocol support is limited to registered Agent executors such 
 
 Docker workloads may optionally download a Master-provided workspace package, unpack it under the Agent workspace directory, and mount it read-only at `/workspace`; see [workspace-artifacts.md](workspace-artifacts.md).
 
-Broader workload types, Minecraft workload execution, RCON, native packaging, output artifact handling, GPU execution, and current workload display remain future work.
+Docker workloads also receive an Agent-generated writable `/output` directory. After the container exits, the Agent scans regular output files and uploads them to the Master before reporting the terminal execution result; see [output-artifacts.md](output-artifacts.md).
+
+Broader workload types, Minecraft workload execution, RCON, native packaging, output artifact UI, GPU execution, and current workload display remain future work.

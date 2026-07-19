@@ -9,7 +9,7 @@ This is suitable for small input packages such as:
 - `input.json`
 - `main.txt`
 
-It is not a persistent workload directory and is not an output artifact channel.
+It is not a persistent workload directory and is not an output artifact channel. Docker workload outputs use the separate writable `/output` mount; see [output-artifacts.md](output-artifacts.md).
 
 ## Current Flow
 
@@ -110,7 +110,6 @@ There is no cleanup or retention policy yet. Execution workspace directories are
 
 ## Current Limitations
 
-- No output artifact upload is implemented yet.
 - Writable workspace mounts are not supported.
 - No workspace cleanup policy is implemented yet.
 - Large multi-GB artifact support is not implemented.
@@ -123,7 +122,6 @@ There is no cleanup or retention policy yet. Execution workspace directories are
 
 Future workspace and artifact work may add:
 
-- Output artifacts.
 - Execution logs upload.
 - Cleanup and retention policy.
 - Large artifact policy.

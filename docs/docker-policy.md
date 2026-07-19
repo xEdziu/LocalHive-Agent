@@ -39,7 +39,7 @@ Current V1 constraints:
 - The Agent uses fixed Docker flags.
 
 ```text
-docker run --rm --network none --memory <memoryMb>m --cpus <cpuCores> <image> <command...>
+docker run --rm --network none --memory <memoryMb>m --cpus <cpuCores> [workspace mount] --mount type=bind,source=<agent-output-directory>,target=/output <image> <command...>
 ```
 
 When a workspace artifact is configured, the Agent adds one generated read-only bind mount:
@@ -50,6 +50,14 @@ When a workspace artifact is configured, the Agent adds one generated read-only 
 
 See [workspace-artifacts.md](workspace-artifacts.md) for the current workspace artifact flow and limits.
 
+Docker workloads also receive one generated writable output bind mount:
+
+```text
+--mount type=bind,source=<agent-output-directory>,target=/output
+```
+
+See [output-artifacts.md](output-artifacts.md) for the current output artifact flow, scanner limits, and upload failure behavior.
+
 The current implementation does not support:
 
 - User-configured host mounts.
@@ -59,7 +67,6 @@ The current implementation does not support:
 - Host network.
 - Custom environment variables.
 - GPU flags.
-- Output artifacts.
 - YAML import.
 - Distributed or sharded execution.
 
@@ -76,6 +83,9 @@ The current implementation does not support:
 | `WORKSPACE_ARTIFACT_DOWNLOAD_FAILED` | The workspace artifact could not be downloaded from the Master. |
 | `WORKSPACE_PACKAGE_INVALID` | The downloaded workspace ZIP is invalid or violates package safety limits. |
 | `WORKSPACE_UNPACK_FAILED` | The Agent could not safely prepare or unpack the local workspace directory. |
+| `OUTPUT_DIRECTORY_PREPARATION_FAILED` | The Agent could not prepare the local output directory. |
+| `OUTPUT_DIRECTORY_INVALID` | The Agent detected unsafe output files, invalid path types, path traversal, symlinks, or exceeded output limits. |
+| `OUTPUT_ARTIFACT_UPLOAD_FAILED` | Docker succeeded, but the Agent could not upload output artifacts to the Master. |
 
 ## Future Extensions
 
