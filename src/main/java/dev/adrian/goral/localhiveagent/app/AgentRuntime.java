@@ -35,6 +35,7 @@ public final class AgentRuntime implements AutoCloseable {
     private final HeartbeatScheduler heartbeatScheduler;
     private final TaskPollingService taskPollingService;
     private final CurrentExecutionStore currentExecutionStore;
+    private final AgentTaskHistoryStore taskHistoryStore;
     private final ExecutorService backgroundExecutor;
     private final CredentialStore credentialStore;
     private final AgentStateStore agentStateStore;
@@ -49,6 +50,7 @@ public final class AgentRuntime implements AutoCloseable {
             HeartbeatScheduler heartbeatScheduler,
             TaskPollingService taskPollingService,
             CurrentExecutionStore currentExecutionStore,
+            AgentTaskHistoryStore taskHistoryStore,
             ExecutorService backgroundExecutor,
             CredentialStore credentialStore,
             AgentStateStore agentStateStore
@@ -61,6 +63,7 @@ public final class AgentRuntime implements AutoCloseable {
         this.heartbeatScheduler = heartbeatScheduler;
         this.taskPollingService = taskPollingService;
         this.currentExecutionStore = currentExecutionStore;
+        this.taskHistoryStore = taskHistoryStore;
         this.backgroundExecutor = backgroundExecutor;
         this.credentialStore = credentialStore;
         this.agentStateStore = agentStateStore;
@@ -133,6 +136,7 @@ public final class AgentRuntime implements AutoCloseable {
                 heartbeatScheduler,
                 taskPollingService,
                 currentExecutionStore,
+                taskHistoryStore,
                 backgroundExecutor,
                 credentialStore,
                 agentStateStore
@@ -169,6 +173,10 @@ public final class AgentRuntime implements AutoCloseable {
 
     public CurrentExecutionStore currentExecutionStore() {
         return currentExecutionStore;
+    }
+
+    public AgentTaskHistoryStore taskHistoryStore() {
+        return taskHistoryStore;
     }
 
     public ExecutorService backgroundExecutor() {

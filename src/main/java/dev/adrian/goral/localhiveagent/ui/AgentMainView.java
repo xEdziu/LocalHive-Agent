@@ -6,6 +6,8 @@ import dev.adrian.goral.localhiveagent.state.HeartbeatState;
 import dev.adrian.goral.localhiveagent.state.MasterConnectionState;
 import dev.adrian.goral.localhiveagent.state.WorkerMode;
 import dev.adrian.goral.localhiveagent.system.MachineSpec;
+import dev.adrian.goral.localhiveagent.task.CurrentExecution;
+import dev.adrian.goral.localhiveagent.task.history.AgentTaskHistoryEntry;
 import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.control.Button;
@@ -23,6 +25,7 @@ import org.kordamp.ikonli.feather.Feather;
 import java.nio.file.Path;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Optional;
 
 public class AgentMainView {
 
@@ -37,6 +40,9 @@ public class AgentMainView {
     private final boolean initialApiKeyConfigured;
     private final String credentialBackendName;
     private final boolean credentialBackendSecure;
+    private AgentConfig currentConfig;
+    private boolean currentApiKeyConfigured;
+    private AgentStateSnapshot latestSnapshot;
 
     private StatusBadge connectionBadge;
     private StatusBadge workerStatusBadge;
@@ -47,6 +53,10 @@ public class AgentMainView {
     private SharedRamPane sharedRamPane;
     private GamerModePane gamerModePane;
     private AgentStatePane agentStatePane;
+    private ConnectionStatusPane connectionStatusPane;
+    private CurrentExecutionPane currentExecutionPane;
+    private TaskHistoryPane taskHistoryPane;
+    private DockerPolicyPane dockerPolicyPane;
     private MaintenanceActionsPane maintenanceActionsPane;
 
     public AgentMainView(
@@ -64,12 +74,23 @@ public class AgentMainView {
         this.initialApiKeyConfigured = initialApiKeyConfigured;
         this.credentialBackendName = credentialBackendName;
         this.credentialBackendSecure = credentialBackendSecure;
+        this.currentConfig = initialConfig;
+        this.currentApiKeyConfigured = initialApiKeyConfigured;
+        this.latestSnapshot = AgentStateSnapshot.initial(
+                initialConfig,
+                initialConfig.hasMasterBaseUrl() && initialConfig.hasWorkerId() && initialApiKeyConfigured,
+                false
+        );
     }
 
     public Parent createRoot() {
         resourceOverviewPane = new ResourceOverviewPane(initialConfig, machineSpec);
         sharedRamPane = new SharedRamPane(initialConfig, detectedTotalRamMb);
         gamerModePane = new GamerModePane(initialConfig);
+        connectionStatusPane = new ConnectionStatusPane();
+        currentExecutionPane = new CurrentExecutionPane();
+        taskHistoryPane = new TaskHistoryPane();
+        dockerPolicyPane = new DockerPolicyPane(initialConfig.docker());
         agentStatePane = new AgentStatePane(
                 initialConfig,
                 configPath,
@@ -117,7 +138,11 @@ public class AgentMainView {
     }
 
     public void refreshConfig(AgentConfig config, boolean apiKeyConfigured) {
+        currentConfig = config;
+        currentApiKeyConfigured = apiKeyConfigured;
         agentStatePane.refreshConfig(config, apiKeyConfigured);
+        connectionStatusPane.refresh(latestSnapshot, config, apiKeyConfigured);
+        dockerPolicyPane.refresh(config.docker());
         sharedRamPane.refreshSharedRam(config.sharedRamMb());
         resourceOverviewPane.setSharedRamMb(config.sharedRamMb());
     }
@@ -133,17 +158,17 @@ public class AgentMainView {
 
     }
 
-    public void applyAgentState(AgentStateSnapshot snapshot) {
+    public void applyAgentState(AgentStateSnapshot snapshot,
+                                Optional<CurrentExecution> currentExecution,
+                                Optional<AgentTaskHistoryEntry> latestTaskHistory) {
+        latestSnapshot = snapshot;
         applyMasterConnectionState(snapshot.masterConnectionState());
         applyWorkerMode(snapshot);
         applyHeartbeatState(snapshot.heartbeatState());
         applyLastHeartbeat(snapshot);
-        agentStatePane.refreshTaskState(
-                snapshot.taskPollingEnabled(),
-                snapshot.currentExecutionSummary(),
-                snapshot.taskHistoryCount(),
-                snapshot.latestTaskHistorySummary()
-        );
+        connectionStatusPane.refresh(snapshot, currentConfig, currentApiKeyConfigured);
+        currentExecutionPane.refresh(CurrentExecutionViewModel.from(currentExecution));
+        taskHistoryPane.refresh(TaskHistorySummaryViewModel.from(latestTaskHistory, snapshot.taskHistoryCount()));
         applyLastMessage(snapshot);
     }
 
@@ -245,8 +270,12 @@ public class AgentMainView {
 
         dashboardGrid.add(new DashboardSection(Feather.SLIDERS, "Shared RAM", sharedRamPane), 0, 0);
         dashboardGrid.add(new DashboardSection(Feather.PLAY_CIRCLE, "Gamer Mode", gamerModePane), 1, 0);
-        dashboardGrid.add(new DashboardSection(Feather.INFO, "Agent State", agentStatePane), 0, 1);
-        dashboardGrid.add(new DashboardSection(Feather.TOOL, "Maintenance", maintenanceActionsPane), 1, 1);
+        dashboardGrid.add(new DashboardSection(Feather.WIFI, "Connection", connectionStatusPane), 0, 1);
+        dashboardGrid.add(new DashboardSection(Feather.SERVER, "Docker Policy", dockerPolicyPane), 1, 1);
+        dashboardGrid.add(new DashboardSection(Feather.CPU, "Current Execution", currentExecutionPane), 0, 2);
+        dashboardGrid.add(new DashboardSection(Feather.LIST, "Last Task", taskHistoryPane), 1, 2);
+        dashboardGrid.add(new DashboardSection(Feather.INFO, "Agent Settings", agentStatePane), 0, 3);
+        dashboardGrid.add(new DashboardSection(Feather.TOOL, "Maintenance", maintenanceActionsPane), 1, 3);
 
         content.getChildren().addAll(resourcesSection, dashboardGrid);
 

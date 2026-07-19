@@ -12,6 +12,8 @@ import dev.adrian.goral.localhiveagent.state.AgentStateSnapshot;
 import dev.adrian.goral.localhiveagent.state.AgentStateStore;
 import dev.adrian.goral.localhiveagent.state.HeartbeatState;
 import dev.adrian.goral.localhiveagent.system.MachineSpec;
+import dev.adrian.goral.localhiveagent.task.CurrentExecution;
+import dev.adrian.goral.localhiveagent.task.history.AgentTaskHistoryEntry;
 import dev.adrian.goral.localhiveagent.validation.AgentConfigValidator;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -20,6 +22,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class AgentMainController {
@@ -539,7 +542,23 @@ public class AgentMainController {
     }
 
     private void applyStateToView(AgentStateSnapshot snapshot) {
-        runOnFxApplicationThread(() -> view.applyAgentState(snapshot));
+        Optional<CurrentExecution> currentExecution = runtime.currentExecutionStore().currentExecution();
+        Optional<AgentTaskHistoryEntry> latestTaskHistory = latestTaskHistoryEntry();
+
+        runOnFxApplicationThread(() -> view.applyAgentState(
+                snapshot,
+                currentExecution,
+                latestTaskHistory
+        ));
+    }
+
+    private Optional<AgentTaskHistoryEntry> latestTaskHistoryEntry() {
+        try {
+            return runtime.taskHistoryStore().findLatest(1).stream().findFirst();
+        } catch (RuntimeException exception) {
+            log.warn("Failed to read latest task history for dashboard: {}", exception.getMessage());
+            return Optional.empty();
+        }
     }
 
     private static void runOnFxApplicationThread(Runnable runnable) {

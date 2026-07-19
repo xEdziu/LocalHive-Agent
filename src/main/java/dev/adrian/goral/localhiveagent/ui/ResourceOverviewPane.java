@@ -21,6 +21,9 @@ class ResourceOverviewPane extends VBox {
 
     private static final double RESOURCE_TILE_ASPECT_RATIO = 0.36;
     private static final double MIN_RESOURCE_TILE_HEIGHT = 120;
+    private static final double MIN_SHARED_RAM_GAUGE_WIDTH = 220;
+    private static final double PREF_SHARED_RAM_GAUGE_WIDTH = 260;
+    private static final double MIN_SHARED_RAM_GAUGE_HEIGHT = 150;
     private static final Color TILE_BACKGROUND = Color.web("#18181b");
     private static final Color TILE_BORDER = Color.web("#34343a");
     private static final Color TILE_FOREGROUND = Color.web("#d8d8de");
@@ -61,7 +64,7 @@ class ResourceOverviewPane extends VBox {
     private Tile createSharedRamTile(int sharedRamMb) {
         int boundedSharedRamMb = Math.max(0, Math.min(sharedRamMb, machineSpec.totalRamMb()));
 
-        return TileBuilder.create()
+        Tile tile = TileBuilder.create()
                 .skinType(Tile.SkinType.BAR_GAUGE)
                 .title("Shared RAM")
                 .unit("%")
@@ -86,6 +89,10 @@ class ResourceOverviewPane extends VBox {
                 .animated(false)
                 .textSize(Tile.TextSize.BIGGER)
                 .build();
+
+        tile.setMinSize(MIN_SHARED_RAM_GAUGE_WIDTH, MIN_SHARED_RAM_GAUGE_HEIGHT);
+        tile.setPrefSize(PREF_SHARED_RAM_GAUGE_WIDTH, MIN_SHARED_RAM_GAUGE_HEIGHT);
+        return tile;
     }
 
     private VBox createCpuTile() {
@@ -149,19 +156,23 @@ class ResourceOverviewPane extends VBox {
         }
 
         addResourceTile(grid, createTotalRamTile(), 0);
-        addResourceTile(grid, sharedRamTile, 1);
+        addResourceTile(grid, sharedRamTile, 1, MIN_SHARED_RAM_GAUGE_HEIGHT);
         addResourceTile(grid, createCpuTile(), 2);
 
         return grid;
     }
 
     private static void addResourceTile(GridPane grid, Region tile, int columnIndex) {
+        addResourceTile(grid, tile, columnIndex, MIN_RESOURCE_TILE_HEIGHT);
+    }
+
+    private static void addResourceTile(GridPane grid, Region tile, int columnIndex, double minHeight) {
         tile.setMaxWidth(Double.MAX_VALUE);
         tile.setMaxHeight(Double.MAX_VALUE);
-        tile.setMinHeight(MIN_RESOURCE_TILE_HEIGHT);
-        tile.setPrefHeight(MIN_RESOURCE_TILE_HEIGHT);
+        tile.setMinHeight(minHeight);
+        tile.setPrefHeight(minHeight);
         tile.widthProperty().addListener((observable, oldValue, newValue) ->
-                updateResourceTileHeight(tile, newValue.doubleValue())
+                updateResourceTileHeight(tile, newValue.doubleValue(), minHeight)
         );
 
         GridPane.setHgrow(tile, Priority.ALWAYS);
@@ -170,12 +181,12 @@ class ResourceOverviewPane extends VBox {
         grid.add(tile, columnIndex, 0);
     }
 
-    private static void updateResourceTileHeight(Region tile, double width) {
+    private static void updateResourceTileHeight(Region tile, double width, double minHeight) {
         if (width <= 0) {
             return;
         }
 
-        tile.setPrefHeight(Math.max(MIN_RESOURCE_TILE_HEIGHT, width * RESOURCE_TILE_ASPECT_RATIO));
+        tile.setPrefHeight(Math.max(minHeight, width * RESOURCE_TILE_ASPECT_RATIO));
     }
 
     private FlowPane createMachineDetailsGrid() {

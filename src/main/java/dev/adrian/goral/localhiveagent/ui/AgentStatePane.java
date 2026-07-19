@@ -30,10 +30,6 @@ class AgentStatePane extends VBox {
     private final Label apiKeyLabel;
     private final Label backendLabel;
     private final Label configPathLabel;
-    private final Label taskPollingLabel;
-    private final Label currentExecutionLabel;
-    private final Label taskHistoryCountLabel;
-    private final Label latestTaskHistoryLabel;
     private final Label statusLabel;
     private final Button saveConfigButton;
     private final Button registerButton;
@@ -54,10 +50,6 @@ class AgentStatePane extends VBox {
                 credentialBackendSecure
         ));
         this.configPathLabel = new Label(configPath.toString());
-        this.taskPollingLabel = new Label("disabled");
-        this.currentExecutionLabel = new Label("none");
-        this.taskHistoryCountLabel = new Label("0 records");
-        this.latestTaskHistoryLabel = new Label("none");
         this.statusLabel = new Label("Ready.");
         this.saveConfigButton = new Button("Save Agent Settings");
         this.registerButton = new Button("Register Worker");
@@ -86,11 +78,7 @@ class AgentStatePane extends VBox {
         addRow(grid, 2, Feather.KEY, "API key", apiKeyLabel);
         addRow(grid, 3, Feather.LOCK, "Credential backend", backendLabel);
         addRow(grid, 4, Feather.FILE_TEXT, "Config path", configPathLabel);
-        addRow(grid, 5, Feather.ACTIVITY, "Task polling", taskPollingLabel);
-        addRow(grid, 6, Feather.CPU, "Current execution", currentExecutionLabel);
-        addRow(grid, 7, Feather.LIST, "Task history", taskHistoryCountLabel);
-        addRow(grid, 8, Feather.CLOCK, "Last task", latestTaskHistoryLabel);
-        addRow(grid, 9, Feather.KEY, "New API key", apiKeyField);
+        addRow(grid, 5, Feather.KEY, "New API key", apiKeyField);
 
         Label messageCaption = new Label("Last message");
         messageCaption.getStyleClass().add("detail-label");
@@ -160,21 +148,6 @@ class AgentStatePane extends VBox {
 
         apiKeyLabel.setText(apiKeyConfigured ? "configured" : "missing");
         applyStateClass(apiKeyLabel, apiKeyConfigured ? "state-good" : "state-warning");
-    }
-
-    void refreshTaskState(boolean taskPollingEnabled,
-                          String currentExecutionSummary,
-                          long taskHistoryCount,
-                          String latestTaskHistorySummary) {
-        taskPollingLabel.setText(taskPollingEnabled ? "enabled" : "disabled");
-        applyStateClass(taskPollingLabel, taskPollingEnabled ? "state-good" : "state-warning");
-        currentExecutionLabel.setText(currentExecutionSummary == null || currentExecutionSummary.isBlank()
-                ? "none"
-                : currentExecutionSummary);
-        taskHistoryCountLabel.setText(taskHistoryCount + (taskHistoryCount == 1 ? " record" : " records"));
-        latestTaskHistoryLabel.setText(latestTaskHistorySummary == null || latestTaskHistorySummary.isBlank()
-                ? "none"
-                : latestTaskHistorySummary);
     }
 
     private static GridPane createGrid() {
