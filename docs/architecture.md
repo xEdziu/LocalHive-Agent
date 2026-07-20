@@ -118,7 +118,8 @@ Heartbeat behavior:
 - Automatic startup is attempted when the Agent has Master URL, Worker ID, and API key.
 - Manual start and stop are available from the Maintenance section.
 - One-off heartbeat is available from the dashboard.
-- Scheduled heartbeat sends `pauseEnabled` and `sharedRamMb`.
+- Scheduled heartbeat sends `pauseEnabled`, `sharedRamMb`, and safe capability metadata.
+- Manual one-off heartbeat sends the same capability metadata.
 - Successful heartbeat records the timestamp and marks Master connection as connected.
 - Failed heartbeat records an error, keeps the last successful timestamp, and marks attention required.
 
@@ -267,5 +268,7 @@ Docker workloads may optionally download a Master-provided workspace package, un
 Docker workloads also receive an Agent-generated writable `/output` directory. After the container exits, the Agent scans regular output files and uploads them to the Master before reporting the terminal execution result; see [output-artifacts.md](output-artifacts.md).
 
 Claimed executions may include a Master-provided `displayName`. The Agent stores the resolved display name in current execution state and local history for UI and log summaries, while executor lookup still uses `executorId` and `executorContractVersion`; see [execution-display-metadata.md](execution-display-metadata.md).
+
+Heartbeat capability reporting publishes safe metadata about the built-in executors and local Docker policy summary to the Master. It does not perform a live Docker probe on every heartbeat and does not affect Agent execution behavior; see [capability-reporting.md](capability-reporting.md).
 
 Broader workload types, Minecraft workload execution, RCON, native packaging, output artifact UI, GPU execution, and current workload display remain future work.

@@ -12,6 +12,7 @@ The current security-relevant areas are:
 - Local file logging.
 - Communication with the LocalHive Master.
 - Local Docker workload policy.
+- Capability reporting in heartbeat.
 - Workspace artifact download, unpacking, and read-only Docker mounting.
 - Output directory creation, scanning, and upload.
 - GitHub Actions permissions.
@@ -133,6 +134,8 @@ The config file is not encrypted. It intentionally does not contain the API key.
 
 Docker policy is local Agent security configuration. See [docker-policy.md](docker-policy.md) for the current Docker workload limits and failure behavior.
 
+Capability reporting sends safe metadata about supported executors and the Docker policy summary in heartbeat. It does not include the API key, Master URL, local config path, credential store details, full config JSON, task history, workspace/output paths, lease tokens, or file contents. See [capability-reporting.md](capability-reporting.md).
+
 Workspace artifact handling is execution-scoped and local to the Agent. The Agent downloads workspace packages with the Worker API key and execution lease, stores them under `.localhive-agent/workspaces/<executionId>/`, rejects unsafe ZIP paths and symlink path chains, and mounts the unpacked workspace read-only at `/workspace`. See [workspace-artifacts.md](workspace-artifacts.md).
 
 Output artifact handling is execution-scoped and local to the Agent. The Agent creates `.localhive-agent/outputs/<executionId>/output`, mounts it writable at `/output`, scans regular files after Docker exits, rejects symlinks and unsafe paths, and uploads files to the Master with the Worker API key and execution lease. Output relative paths are metadata only on the Master, and output contents are not stored in local SQLite history. See [output-artifacts.md](output-artifacts.md).
@@ -167,6 +170,7 @@ The current code mitigates these specific risks:
 - Local logs are bounded.
 - Representative credential-related log messages are sanitized and tested.
 - Output artifact upload uses the Worker API key and execution lease without logging those secret values.
+- Heartbeat capability reporting excludes secrets, local paths, raw config, task history, and lease tokens.
 - GitHub Actions workflow uses read-only repository permissions and disables persisted checkout credentials.
 
 ## Known Limitations

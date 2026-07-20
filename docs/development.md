@@ -44,6 +44,7 @@ docs/
   security.md
   development.md
   docker-policy.md
+  capability-reporting.md
   workspace-artifacts.md
   output-artifacts.md
   execution-display-metadata.md
@@ -121,6 +122,7 @@ Main tested areas:
 - `AgentConfig` and `ConfigService`
 - Shared RAM and readiness validation
 - `HeartbeatScheduler`
+- `AgentCapabilityReporter`
 - `MasterClientErrorMapper`
 - `CredentialStoreFactory`
 - `InsecureFileCredentialStore`
@@ -224,6 +226,8 @@ Use this sequence for new Agent capabilities:
 The current Agent supports the initial Task Protocol path through registered executors. Keep future additions aligned with the Master task domain and API.
 
 Agent AU0 consumes the optional Master claim response `displayName` field and still works with older Master claim responses that omit it. Future additive claim response fields are ignored by the claim DTO; see [execution-display-metadata.md](execution-display-metadata.md).
+
+M12 sends safe capability metadata with automatic and manual heartbeat. Keep future capability changes additive and avoid sending secrets, local paths, full config JSON, task history, or lease tokens; see [capability-reporting.md](capability-reporting.md).
 
 Future work may include:
 

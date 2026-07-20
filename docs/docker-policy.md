@@ -2,6 +2,8 @@
 
 Docker policy is a local security policy enforced by the Agent. The Master can send a Docker workload, but the Agent executes it only when the local policy allows the requested image and resource limits. Agent policy is the final enforcement layer on the worker machine.
 
+The Agent also reports a safe Docker policy summary in heartbeat capabilities. Reporting includes the enabled flag, allowed image list, max memory, max CPU, and GPU policy flag, but it does not change local enforcement and does not prove live Docker daemon health. See [capability-reporting.md](capability-reporting.md).
+
 ## Configuration
 
 The `docker` section is stored in the Agent config file:

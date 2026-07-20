@@ -126,6 +126,7 @@ See [docs/docker-policy.md](docs/docker-policy.md) for the current Docker worklo
 See [docs/workspace-artifacts.md](docs/workspace-artifacts.md) for the current workspace artifact flow.
 See [docs/output-artifacts.md](docs/output-artifacts.md) for the current output artifact flow.
 See [docs/execution-display-metadata.md](docs/execution-display-metadata.md) for execution display names used by claim, current execution, and task history views.
+See [docs/capability-reporting.md](docs/capability-reporting.md) for heartbeat capability reporting.
 
 ## Credential Storage
 
@@ -196,6 +197,7 @@ CI uses Temurin 21, Maven cache, and uploads Surefire reports only on failure.
 
 - [Architecture](docs/architecture.md)
 - [Docker Policy](docs/docker-policy.md)
+- [Capability Reporting](docs/capability-reporting.md)
 - [Workspace Artifacts](docs/workspace-artifacts.md)
 - [Output Artifacts](docs/output-artifacts.md)
 - [Execution Display Metadata](docs/execution-display-metadata.md)
