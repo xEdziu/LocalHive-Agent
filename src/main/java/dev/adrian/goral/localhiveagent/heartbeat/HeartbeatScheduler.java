@@ -135,7 +135,8 @@ public final class HeartbeatScheduler implements AutoCloseable {
 
             HeartbeatRequest request = new HeartbeatRequest(
                     config.pauseEnabled(),
-                    config.sharedRamMb()
+                    config.sharedRamMb(),
+                    AgentCapabilityReporter.currentCapabilities(config.docker())
             );
 
             HeartbeatResponse response = registrationClient.sendHeartbeat(

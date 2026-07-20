@@ -2,6 +2,7 @@ package dev.adrian.goral.localhiveagent.ui;
 
 import dev.adrian.goral.localhiveagent.app.AgentRuntime;
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
+import dev.adrian.goral.localhiveagent.heartbeat.AgentCapabilityReporter;
 import dev.adrian.goral.localhiveagent.heartbeat.HeartbeatTickResult;
 import dev.adrian.goral.localhiveagent.master.AgentRegistrationResult;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
@@ -368,7 +369,8 @@ public class AgentMainController {
 
             HeartbeatRequest request = new HeartbeatRequest(
                     config.pauseEnabled(),
-                    config.sharedRamMb()
+                    config.sharedRamMb(),
+                    AgentCapabilityReporter.currentCapabilities(config.docker())
             );
 
             HeartbeatResponse response = runtime.registrationClient().sendHeartbeat(

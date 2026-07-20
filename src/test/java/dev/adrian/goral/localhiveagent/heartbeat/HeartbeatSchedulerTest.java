@@ -2,6 +2,7 @@ package dev.adrian.goral.localhiveagent.heartbeat;
 
 import dev.adrian.goral.localhiveagent.config.AgentConfig;
 import dev.adrian.goral.localhiveagent.config.ConfigService;
+import dev.adrian.goral.localhiveagent.config.DockerPolicy;
 import dev.adrian.goral.localhiveagent.master.MasterClientException;
 import dev.adrian.goral.localhiveagent.master.RegistrationClient;
 import dev.adrian.goral.localhiveagent.master.dto.HeartbeatRequest;
@@ -54,6 +55,42 @@ class HeartbeatSchedulerTest {
         assertEquals("", snapshot.lastError());
         assertEquals(4096, fixture.registrationClient.lastRequest.sharedRamMb());
         assertFalse(fixture.registrationClient.lastRequest.pauseEnabled());
+        assertNotNull(fixture.registrationClient.lastRequest.capabilities());
+        assertEquals(2, fixture.registrationClient.lastRequest.capabilities().executors().size());
+        assertEquals("localhive.no-op", fixture.registrationClient.lastRequest.capabilities()
+                .executors().get(0).executorId());
+        assertEquals(1, fixture.registrationClient.lastRequest.capabilities()
+                .executors().get(0).executorContractVersion());
+        assertTrue(fixture.registrationClient.lastRequest.capabilities().executors().get(0).enabled());
+        assertEquals("localhive.docker.workload", fixture.registrationClient.lastRequest.capabilities()
+                .executors().get(1).executorId());
+        assertEquals(1, fixture.registrationClient.lastRequest.capabilities()
+                .executors().get(1).executorContractVersion());
+        assertTrue(fixture.registrationClient.lastRequest.capabilities().executors().get(1).enabled());
+        assertTrue(fixture.registrationClient.lastRequest.capabilities().docker().enabled());
+        assertEquals(List.of("alpine:3.20"), fixture.registrationClient.lastRequest.capabilities().docker().allowedImages());
+        assertEquals(4096, fixture.registrationClient.lastRequest.capabilities().docker().maxMemoryMb());
+        assertEquals(8, fixture.registrationClient.lastRequest.capabilities().docker().maxCpuCores());
+        assertFalse(fixture.registrationClient.lastRequest.capabilities().docker().gpuAllowed());
+    }
+
+    @Test
+    void shouldReportDockerExecutorDisabledWhenDockerPolicyIsDisabled() {
+        TestFixture fixture = createFixture(new AgentConfig(
+                "http://localhost:8080",
+                UUID.fromString("123e4567-e89b-12d3-a456-426614174000"),
+                4096,
+                false,
+                new DockerPolicy(false, List.of("alpine:3.20"), 4096, 8, false)
+        ));
+        AtomicReference<HeartbeatTickResult> result = new AtomicReference<>();
+
+        fixture.scheduler.start(Duration.ofSeconds(1), result::set);
+        fixture.scheduler.runHeartbeatOnce(result::set);
+
+        assertTrue(result.get().success());
+        assertFalse(fixture.registrationClient.lastRequest.capabilities().executors().get(1).enabled());
+        assertFalse(fixture.registrationClient.lastRequest.capabilities().docker().enabled());
     }
 
     @Test
@@ -96,13 +133,17 @@ class HeartbeatSchedulerTest {
     }
 
     private TestFixture createFixture() {
-        ConfigService configService = new ConfigService(tempDir.resolve("config.json"));
-        configService.save(new AgentConfig(
+        return createFixture(new AgentConfig(
                 "http://localhost:8080",
                 UUID.fromString("123e4567-e89b-12d3-a456-426614174000"),
                 4096,
                 false
         ));
+    }
+
+    private TestFixture createFixture(AgentConfig config) {
+        ConfigService configService = new ConfigService(tempDir.resolve("config.json"));
+        configService.save(config);
 
         AgentStateStore agentStateStore = AgentStateStore.fromConfig(configService.load(), true, false);
         FakeRegistrationClient registrationClient = new FakeRegistrationClient();
