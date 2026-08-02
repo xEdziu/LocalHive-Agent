@@ -446,6 +446,7 @@ public final class TaskPollingService implements AutoCloseable {
             currentExecutionStore.clear();
             publishCurrentExecutionSummary();
             log.info("Current execution cleared after successful terminal report. executionId={}", execution.executionId());
+            requestImmediatePollingAfterTerminalReport(execution.executionId());
         } catch (RuntimeException exception) {
             keepErrorState(
                     "Failed to report execution SUCCEEDED: " + exception.getMessage(),
@@ -492,12 +493,35 @@ public final class TaskPollingService implements AutoCloseable {
             currentExecutionStore.clear();
             publishCurrentExecutionSummary();
             log.info("Current execution cleared after failed report success. executionId={}", execution.executionId());
+            requestImmediatePollingAfterTerminalReport(execution.executionId());
         } catch (RuntimeException exception) {
             keepErrorState(
                     "Failed to report execution FAILED: " + exception.getMessage(),
                     execution.executionId(),
                     "Failed to report FAILED. Terminal report failed and current execution moved to ERROR."
             );
+        }
+    }
+
+    private void requestImmediatePollingAfterTerminalReport(UUID executionId) {
+        if (!running.get()) {
+            return;
+        }
+
+        try {
+            pollingExecutor.execute(this::executePollingSafely);
+            log.info(
+                    "Execution {} completed and reported; checking for another assignment immediately.",
+                    executionId
+            );
+        } catch (RejectedExecutionException exception) {
+            if (running.get()) {
+                log.warn(
+                        "Immediate task polling request rejected after execution {} completed: {}",
+                        executionId,
+                        exception.getMessage()
+                );
+            }
         }
     }
 

@@ -19,7 +19,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -64,6 +66,18 @@ class TaskPollingServiceTest {
     }
 
     @Test
+    void shouldStopCancelScheduledPolling() {
+        TestFixture fixture = createFixture(false, true, AgentExecutorRegistry.withDefaultExecutors());
+
+        fixture.service.start(TaskPollingService.DEFAULT_POLLING_INTERVAL);
+        fixture.service.stop();
+
+        assertFalse(fixture.service.isRunning());
+        assertFalse(fixture.agentStateStore.snapshot().taskPollingEnabled());
+        assertTrue(fixture.executor.fixedDelayCancelled());
+    }
+
+    @Test
     void shouldSkipClaimWhenWorkerIsPaused() {
         TestFixture fixture = createFixture(true, true, AgentExecutorRegistry.withDefaultExecutors());
         fixture.taskClient.nextClaim = Optional.of(noOpPayload(NOW.plusMinutes(1)));
@@ -73,6 +87,7 @@ class TaskPollingServiceTest {
         assertEquals(0, fixture.taskClient.claimCalls);
         assertTrue(fixture.currentExecutionStore.currentExecution().isEmpty());
         assertEquals(0, fixture.taskHistoryStore.count());
+        assertEquals(0, fixture.executor.immediateCommands());
     }
 
     @Test
@@ -120,6 +135,7 @@ class TaskPollingServiceTest {
         assertTrue(fixture.currentExecutionStore.currentExecution().isEmpty());
         assertEquals("none", fixture.agentStateStore.snapshot().currentExecutionSummary());
         assertEquals(0, fixture.taskHistoryStore.count());
+        assertEquals(0, fixture.executor.immediateCommands());
     }
 
     @Test
@@ -137,6 +153,26 @@ class TaskPollingServiceTest {
         assertEquals(AgentTaskHistoryStatus.SUCCEEDED, history.status());
         assertEquals(1, fixture.agentStateStore.snapshot().taskHistoryCount());
         assertTrue(fixture.agentStateStore.snapshot().latestTaskHistorySummary().contains("SUCCEEDED"));
+    }
+
+    @Test
+    void shouldClaimAgainImmediatelyAfterSuccessfulTerminalReport() {
+        TestFixture fixture = createFixture(false, true, AgentExecutorRegistry.withDefaultExecutors());
+        fixture.taskClient.enqueueClaim(Optional.of(noOpPayload(NOW.plusMinutes(1))));
+        fixture.taskClient.enqueueClaim(Optional.empty());
+
+        fixture.startAndRunOnce();
+
+        assertEquals(1, fixture.taskClient.claimCalls);
+        assertEquals(List.of("RUNNING", "SUCCEEDED"), fixture.taskClient.reports);
+        assertEquals(1, fixture.executor.immediateCommands());
+
+        fixture.executor.runNextImmediate();
+
+        assertEquals(2, fixture.taskClient.claimCalls);
+        assertEquals(List.of("RUNNING", "SUCCEEDED"), fixture.taskClient.reports);
+        assertTrue(fixture.currentExecutionStore.currentExecution().isEmpty());
+        assertEquals(0, fixture.executor.immediateCommands());
     }
 
     @Test
@@ -279,6 +315,7 @@ class TaskPollingServiceTest {
         AgentTaskHistoryEntry history = fixture.taskHistoryStore.findByExecutionId(EXECUTION_ID).orElseThrow();
         assertEquals(AgentTaskHistoryStatus.ERROR, history.status());
         assertTrue(history.lastError().contains("Failed to report execution SUCCEEDED"));
+        assertEquals(0, fixture.executor.immediateCommands());
     }
 
     @Test
@@ -593,6 +630,7 @@ class TaskPollingServiceTest {
     private static final class FakeMasterTaskClient extends MasterTaskClient {
 
         private Optional<ClaimedExecutionPayload> nextClaim = Optional.empty();
+        private final Deque<Optional<ClaimedExecutionPayload>> queuedClaims = new ArrayDeque<>();
         private final List<String> reports = new ArrayList<>();
         private int claimCalls;
         private int renewCalls;
@@ -609,7 +647,14 @@ class TaskPollingServiceTest {
             if (throwOnClaim) {
                 throw new MasterClientException("claim failed");
             }
+            if (!queuedClaims.isEmpty()) {
+                return queuedClaims.removeFirst();
+            }
             return nextClaim;
+        }
+
+        private void enqueueClaim(Optional<ClaimedExecutionPayload> claim) {
+            queuedClaims.addLast(claim);
         }
 
         @Override
@@ -683,6 +728,7 @@ class TaskPollingServiceTest {
             extends AbstractExecutorService implements ScheduledExecutorService {
 
         private final RecordingScheduledFuture future = new RecordingScheduledFuture();
+        private final List<Runnable> immediateCommands = new ArrayList<>();
         private Runnable scheduledCommand;
         private long initialDelay;
         private long delay;
@@ -731,7 +777,19 @@ class TaskPollingServiceTest {
 
         @Override
         public void execute(Runnable command) {
-            command.run();
+            immediateCommands.add(command);
+        }
+
+        private int immediateCommands() {
+            return immediateCommands.size();
+        }
+
+        private void runNextImmediate() {
+            immediateCommands.removeFirst().run();
+        }
+
+        private boolean fixedDelayCancelled() {
+            return future.isCancelled();
         }
 
         @Override
